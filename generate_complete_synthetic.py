@@ -12,7 +12,7 @@ import os
 import random
 import sys
 import time
-from collections import Counter
+from collections import Counter, deque
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import ExitStack, closing
 from dataclasses import dataclass
@@ -20,13 +20,10 @@ from datetime import datetime, timezone
 from importlib.metadata import version
 from itertools import islice
 from pathlib import Path
-from typing import Any
-
-import numpy as np
+from typing import Any, Protocol
 
 from scripts.lib.report_composer import ReportComposer, ReportContent, ReportTest, CoverageTracker
 from scripts.lib.template_engine import TemplateEngine
-from scripts.lib.degradation_engine import DegradationEngine
 from scripts.lib.ground_truth_writer import GroundTruthWriter
 from scripts.lib.dataset_output import staged_output
 
@@ -94,6 +91,8 @@ def visible_ground_truth(report: ReportContent, template_config: dict[str, Any])
 
 
 def _wrap_cell(value: str, width: float, font_name: str, size: float) -> list[str]:
+    if not value:
+        return [""]
     from reportlab.lib.textsplit import wordSplit
     from reportlab.lib.utils import simpleSplit
     from reportlab.pdfbase import pdfmetrics
@@ -105,6 +104,9 @@ def _wrap_cell(value: str, width: float, font_name: str, size: float) -> list[st
         for used_font, _ in pdfmetrics.unicode2T1(value, [font] + font.substitutionFonts):
             if used_font.fontName == "ZapfDingbats":
                 raise ValueError(f"Unsupported glyph in table cell {value!r}")
+    # Canonical cells that already fit need no word-by-word measuring.
+    if value == " ".join(value.split()) and pdfmetrics.stringWidth(value, font_name, size) < width:
+        return [value]
     lines = []
     for line in simpleSplit(value, font_name, size, width):
         if pdfmetrics.stringWidth(line, font_name, size) <= width:
@@ -307,13 +309,18 @@ def render_simple_pdf(
 # PDF to degraded image conversion
 # ---------------------------------------------------------------------------
 
+class _PageDegrader(Protocol):
+    """Raster backends receive one BGR page and the seeded report RNG."""
+    def degrade(self, image: Any, tier: int, rng: random.Random) -> Any: ...
+
+
 def _pdf_to_degraded_image(
     pdf_path: Path,
     img_dir: Path,
     report_id: str,
     tier: int,
     rng: random.Random,
-    degradation_engine: DegradationEngine,
+    degradation_engine: _PageDegrader,
     dpi: int = 300,
 ) -> dict[str, Any]:
     """Rasterize all pages in reading order, keeping the original first-page filename."""
@@ -365,6 +372,8 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
             raise ValueError("PDF renderer produced no pages")
         image_paths: list[str] = []
         if job.tier is not None:
+            from scripts.lib.degradation_engine import DegradationEngine
+
             exported = _pdf_to_degraded_image(
                 pdf_path, job.output / "images", report_id, job.tier,
                 random.Random(job.seed), DegradationEngine(), dpi=job.dpi,
@@ -437,8 +446,11 @@ def _configure_image_worker():
     cv2.setNumThreads(1)
 
 
-def _rendered_reports(jobs, workers):
+def _rendered_reports(jobs, workers, *, render_images):
     if workers == 1:
+        if not render_images:
+            yield from map(generate_one, jobs)
+            return
         import cv2
 
         previous = cv2.getNumThreads()
@@ -451,10 +463,16 @@ def _rendered_reports(jobs, workers):
     # Bound queued reports and yield in report order. Composition owns one coverage
     # tracker for the entire run; workers can render documents in any order.
     # Spawn starts fresh native-library state and also works without Unix sockets.
-    with ProcessPoolExecutor(max_workers=workers, initializer=_configure_image_worker,
+    with ProcessPoolExecutor(max_workers=workers, initializer=_configure_image_worker if render_images else None,
                              mp_context=multiprocessing.get_context("spawn")) as pool:
-        while batch := list(islice(jobs, 2 * workers)):
-            yield from pool.map(generate_one, batch)
+        jobs = iter(jobs)
+        pending = deque(pool.submit(generate_one, job) for job in islice(jobs, 2 * workers))
+        while pending:
+            item = pending.popleft().result()
+            job = next(jobs, None)
+            if job is not None:
+                pending.append(pool.submit(generate_one, job))
+            yield item
 
 
 def _file_sha256(path: Path) -> str:
@@ -492,7 +510,7 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
         writer = None
         if args.sft or args.dpo or args.grpo:
             writer = stack.enter_context(GroundTruthWriter(output))
-        for index, item in enumerate(_rendered_reports(jobs, workers), 1):
+        for index, item in enumerate(_rendered_reports(jobs, workers, render_images=args.format != "pdf"), 1):
             with (output / item["ground_truth"]).open(encoding="utf-8") as stream:
                 gt = json.load(stream)
             for row in gt["results"]:
@@ -542,7 +560,7 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
         "elapsed_seconds": round(elapsed, 2),
         "reports_per_second": round(args.count / elapsed, 2) if elapsed else 0,
     }
-    runtime_versions = {"reportlab": version("reportlab"), "numpy": np.__version__}
+    runtime_versions = {"reportlab": version("reportlab"), "numpy": version("numpy")}
     if args.format != "pdf":
         import cv2
         import pypdfium2 as pdfium
@@ -581,7 +599,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="New or empty destination directory")
     parser.add_argument("--data-dir", type=Path, default=_DATA_DIR,
                         help="Directory containing generator dictionary inputs")
-    parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) - 2))
+    parser.add_argument("--workers", type=int, help="Parallel render processes. By default use up to 4, or 1 for images above 300 DPI.")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dpi", type=int, default=300,
                         help="Page-image rasterization resolution in DPI (72–600, default 300)")
@@ -600,6 +618,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.add_argument(f"--{mode}", action=argparse.BooleanOptionalAction,
                             help=f"Emit {mode.upper()} JSONL (default: enabled for JPEG output)")
     args = parser.parse_args(argv)
+    if args.workers is None:
+        available = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+        limit = 1 if args.format != "pdf" and args.dpi > 300 else 4
+        args.workers = max(1, min(available - 2, limit))
     if args.count < 1 or args.workers < 1 or args.min_loinc_coverage < 0:
         parser.error("--count and --workers must be positive; --min-loinc-coverage must be nonnegative")
     if not 72 <= args.dpi <= 600:

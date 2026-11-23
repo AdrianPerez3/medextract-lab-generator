@@ -282,8 +282,8 @@ class ReportComposer:
         for p in raw_panels:
             self._panel_defs[p["id"]] = p
 
-        # Load metadata for COMMON_TEST_RANK
-        with open(metadata_path) as f:
+        # Components and names supply the veterinary filter and fallback panel labels.
+        with open(metadata_path, encoding="utf-8") as f:
             self._metadata: dict[str, dict] = json.load(f)
 
         # Build the set of all LOINCs known to the value generator
@@ -291,13 +291,6 @@ class ReportComposer:
         self.all_loincs = self.eligible_loincs
         if not self.eligible_loincs:
             raise ValueError("No eligible LOINC terms in supplied synthetic ranges")
-
-        # Build LOINC frequency tiers for panel weighting
-        self._loinc_ranks: dict[str, int] = {}
-        for loinc, meta in self._metadata.items():
-            rank = meta.get("COMMON_TEST_RANK", 0)
-            if rank > 0:
-                self._loinc_ranks[loinc] = rank
 
         # Precompute: for each enriched panel, which LOINCs are known
         self._enriched_panels: dict[str, dict[str, Any]] = {}

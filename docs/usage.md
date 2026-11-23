@@ -17,6 +17,18 @@ The quickstart uses clean pages at 144 DPI. Omit `--tiers` for mixed simulated c
 
 Use `--format pdf` for vector output, `--format jpg` for page images, or `--format both` for both. JPEG output defaults to 300 DPI and accepts integer resolutions from 72 to 600. Choose a new or empty output directory for each run. List all options with `python generate_complete_synthetic.py --help`.
 
+The generator automatically uses up to four render processes. For page images above 300 DPI the default is one process. Higher resolutions increase the number of pixels on every page. Set `--workers 1` to minimize concurrent memory use, or choose an explicit worker count after measuring a representative run. A fixed seed produces the same ordered report artifacts across worker counts on the same software and platform.
+
+## Plot dataset coverage
+
+From the project root, run this after generating a schema-v2 dataset. Choose a new filename for the chart.
+
+```sh
+python scripts/analyze_synthetic_dataset.py --dataset demo-run --rare-at-most 5 --html coverage.html
+```
+
+Open `coverage.html` in a browser. The tool also writes the analysis as JSON to stdout. It reads one visible label file per report, verifies its recorded checksum, and counts the rows assigned to each eligible LOINC. The chart shows missing and rare codes, how many result rows the ten most common codes account for, and how reports vary in pages, row counts, columns and capture tier. Page counts and tiers come from the manifest. Use the validator to check media integrity and source fingerprints.
+
 ## Inspect results and flags
 
 The ordinary command leaves reference intervals empty and flags null. For a fixture that exercises those fields, pass `--simulated-reference-ranges`. The page footer then identifies displayed intervals and flags as simulated. Values, intervals and patient profiles are software test fixtures. They have no clinical validation.

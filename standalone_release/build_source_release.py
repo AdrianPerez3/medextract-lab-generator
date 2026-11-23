@@ -27,6 +27,7 @@ SOURCE_FILES = (
     "standalone_release/build_source_release.py",
     "generate_complete_synthetic.py",
     "scripts/package_training_data.py",
+    "scripts/analyze_synthetic_dataset.py",
     "scripts/validate_synthetic_dataset.py",
     "scripts/lib/__init__.py",
     "scripts/lib/build_terminology.py",
@@ -46,6 +47,7 @@ SOURCE_FILES = (
     "scripts/lib/test_render_synthetic.py",
     "scripts/lib/test_dataset_integrity.py",
     "scripts/lib/test_package_training_cli.py",
+    "scripts/lib/test_analyze_synthetic_dataset.py",
     "scripts/lib/test_generate_complete_cli.py",
 )
 RELEASE_FILES = (

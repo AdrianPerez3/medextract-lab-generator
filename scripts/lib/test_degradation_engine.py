@@ -596,3 +596,59 @@ def test_engine_does_not_import_augraphy(monkeypatch) -> None:
     monkeypatch.setattr(builtins, "__import__", import_without_augraphy)
     engine = DegradationEngine()
     assert engine.degrade(_make_document_image(150, 80), 0, random.Random(42)).size > 0
+
+
+@pytest.mark.parametrize("shape", [(1, 1), (1, 7, 3), (9, 1, 3), (23, 39)])
+@pytest.mark.parametrize("tier", range(5))
+def test_singleton_and_noncontiguous_readonly_inputs(shape, tier):
+    base = np.arange(np.prod(shape), dtype=np.uint8).reshape(shape)
+    view = base[:, ::2]
+    view.setflags(write=False)
+    before = view.copy()
+    actual = DegradationEngine().degrade(view, tier, random.Random(27))
+    assert actual.shape == view.shape and actual.dtype == np.uint8
+    np.testing.assert_array_equal(view, before)
+    assert not np.shares_memory(view, actual)
+
+
+@pytest.mark.parametrize("image", [[], np.zeros((0, 4), dtype=np.uint8),
+    np.zeros((5,), dtype=np.uint8), np.zeros((5, 6, 1), dtype=np.uint8),
+    np.zeros((5, 6, 4), dtype=np.uint8), np.zeros((5, 6, 3), dtype=np.float32)])
+def test_invalid_image_fails_at_public_boundary(image):
+    with pytest.raises(ValueError, match="uint8"):
+        DegradationEngine().degrade(image, 0, random.Random(5))
+
+
+@pytest.mark.parametrize("tier", [1.5, None, "3"])
+def test_invalid_tier_type_fails_at_public_boundary(tier):
+    with pytest.raises(ValueError, match="tier must be 0-4"):
+        DegradationEngine().degrade(np.zeros((4, 4), np.uint8), tier, random.Random(5))
+
+
+@pytest.mark.parametrize("failure", ["encode", "decode"])
+def test_failed_jpeg_roundtrip_surfaces_a_write_failure(monkeypatch, failure):
+    import cv2
+    if failure == "encode":
+        monkeypatch.setattr(cv2, "imencode", lambda *args: (False, None))
+    else:
+        monkeypatch.setattr(cv2, "imdecode", lambda *args: None)
+    with pytest.raises(OSError, match="JPEG"):
+        DegradationEngine().degrade(np.zeros((5, 7, 3), dtype=np.uint8), 0, random.Random(2))
+
+
+@pytest.mark.parametrize("sigma", [7.5, 22.0])
+def test_tiled_noise_preserves_draw_sequence_and_pixel_rounding(sigma):
+    # A 515-wide page crosses a tile after an odd number of channels, so the
+    # normal sampler's spare draw must carry through to the following tile.
+    image = np.random.RandomState(91).randint(0, 256, (525, 515, 3), dtype=np.uint8)
+    expected_rng = np.random.RandomState(13)
+    if sigma > 15:
+        noise = expected_rng.normal(1, sigma / 100, image.shape).astype(np.float32)
+        frame = image.astype(np.float32) * noise
+    else:
+        noise = expected_rng.normal(0, sigma, image.shape).astype(np.float32)
+        frame = image.astype(np.float32) + noise
+    result_rng = np.random.RandomState(13)
+    np.testing.assert_array_equal(_gaussian_noise(image, sigma, result_rng),
+                                  np.clip(frame, 0, 255).astype(np.uint8))
+    assert result_rng.normal() == expected_rng.normal()

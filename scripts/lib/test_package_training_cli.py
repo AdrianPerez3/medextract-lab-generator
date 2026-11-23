@@ -131,3 +131,89 @@ def test_missing_v2_metadata_cannot_downgrade_partitioning_to_legacy(tmp_path):
     result = cli(tmp_path)
     assert result.returncode != 0 and "schema-v2" in result.stderr
     assert not (tmp_path / "splits").exists()
+
+
+def test_invalid_metadata_object_has_a_cli_error_without_traceback(tmp_path):
+    (tmp_path / "metadata.json").write_text("[]")
+    (tmp_path / "sft_train.jsonl").write_text('{"id":1}\n')
+    result = cli(tmp_path)
+    assert result.returncode and "metadata" in result.stderr and "Traceback" not in result.stderr
+    assert not (tmp_path / "splits").exists()
+
+
+def test_legacy_shuffle_preserves_original_text_and_seed(tmp_path):
+    import random
+
+    lines = [f'  {{ "id": {i}, "etiqueta": "µL á" }} ' for i in range(17)]
+    # Legacy inputs allow empty physical lines, mixed newlines and an unterminated last row.
+    source = tmp_path / "sft_train.jsonl"
+    source.write_bytes(("\r\n\r".join(lines[:9]) + "\n" + "\r".join(lines[9:])).encode())
+    result = cli(tmp_path, "--split", "70,20,10", "--seed", "13")
+    assert result.returncode == 0, result.stderr
+    random.Random(13).shuffle(lines)
+    out = tmp_path / "splits"
+    for name, expected in (("train", lines[:11]), ("val", lines[11:14]), ("test", lines[14:])):
+        assert (out / f"sft_{name}.jsonl").read_text().splitlines() == expected
+
+
+@pytest.mark.parametrize("train,val", [(-25, 25), (80, 21), (float("nan"), 0)])
+def test_direct_split_rejects_bad_percentages_before_writing(tmp_path, train, val):
+    source = tmp_path / "source.jsonl"
+    source.write_text('{"id":1}\n' * 4)
+    output = tmp_path / "result"
+    with pytest.raises(ValueError, match="percentages"):
+        package.split_jsonl_file(source, output, "sft", train, val, 1)
+    assert not output.exists()
+
+
+def test_direct_split_preserves_existing_files_on_conflict(tmp_path):
+    source = tmp_path / "source.jsonl"
+    source.write_text('{"id":1}\n')
+    output = tmp_path / "result"
+    output.mkdir()
+    sentinel = output / "sft_val.jsonl"
+    sentinel.write_text("keep")
+    with pytest.raises(FileExistsError):
+        package.split_jsonl_file(source, output, "sft", 80, 10, 1)
+    assert list(output.iterdir()) == [sentinel] and sentinel.read_text() == "keep"
+
+
+def test_direct_split_rolls_back_a_changed_source(tmp_path, monkeypatch):
+    import random
+
+    source = tmp_path / "source.jsonl"
+    source.write_text('{"id":1}\n' * 4)
+    output = tmp_path / "result"
+    def append_during_shuffle(_self, _order):
+        with source.open("a") as stream:
+            stream.write('{"id":2}\n')
+    monkeypatch.setattr(random.Random, "shuffle", append_during_shuffle)
+    with pytest.raises(ValueError, match="changed"):
+        package.split_jsonl_file(source, output, "sft", 80, 10, 1)
+    assert not list(output.glob("*"))
+
+
+def test_two_pass_v2_packager_rejects_same_id_replacement(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    data.mkdir()
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    images = ("images/RPT_000000.jpg",)
+    truth = {"results": [{"value": "9,52"}]}
+    accepted = package._json_digest(truth)
+    row = {"images": images, "messages": [{"role": "user", "content": "<image>"},
+           {"role": "assistant", "content": json.dumps(truth)}]}
+    path = data / "sft_train.jsonl"
+    source = json.dumps(row) + "\n"
+    path.write_text(source)
+    digest = package._json_digest
+
+    def change_after_read(obj):
+        path.write_text(source.replace("9,52", "XXXX"))
+        return digest(obj)
+
+    monkeypatch.setattr(package, "_json_digest", change_after_read)
+    with pytest.raises(ValueError, match="changed"):
+        package._split_v2_stream(data, stage, Path("."), "sft",
+                                 {"train": ["RPT_000000"], "val": [], "test": []},
+                                 {images: "RPT_000000"}, {"RPT_000000": accepted})

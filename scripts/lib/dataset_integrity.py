@@ -10,20 +10,25 @@ from decimal import Decimal
 from itertools import zip_longest
 from pathlib import Path
 
-import pypdfium2
-from PIL import Image
+
+def _reject_constant(value: str):
+    raise ValueError(f"Invalid JSON number: {value}")
+
+
+# The standard library accepts NaN and Infinity unless explicitly disabled.
+decode_json = json.JSONDecoder(parse_constant=_reject_constant).decode
 
 
 def read_json(path):
     with path.open(encoding="utf-8") as stream:
-        return json.load(stream)
+        return decode_json(stream.read())
 
 
 def json_lines(path):
-    with path.open(encoding="utf-8") as stream:
+    with path.open("rb") as stream:
         for number, line in enumerate(stream, 1):
             try:
-                record = json.loads(line)
+                record = decode_json(line.decode("utf-8"))
             except ValueError as exc:
                 raise ValueError(f"{path.name}:{number}: invalid JSON") from exc
             if not isinstance(record, dict):
@@ -40,10 +45,10 @@ def check_training_record(kind, row, images, truth):
     if messages[1]["content"].count("<image>") != len(images):
         raise ValueError(f"{kind} image token count differs from page count")
     target = row["solution"] if kind == "grpo" else messages[-1]["content"]
-    if json.loads(target) != truth:
+    if decode_json(target) != truth:
         raise ValueError(f"{kind} target differs from the visible ground truth")
     if kind == "dpo":
-        rejected = json.loads(row["rejected_response"])
+        rejected = decode_json(row["rejected_response"])
         if not isinstance(rejected, dict) or not isinstance(rejected.get("results"), list) or rejected == truth:
             raise ValueError("DPO needs a distinct, structured negative example")
 
@@ -59,6 +64,7 @@ def check_projection(visible, normalized, columns, sections, european, reference
     raw = {identity(row): row for row in normalized}
     if len(raw) != len(normalized) or len({row["loinc"] for row in normalized}) != len(raw):
         raise ValueError("Duplicate analyte in a synthetic report")
+    has_total_cholesterol = any(row["loinc"] == "2093-3" and row["unit"] == "mg/dL" for row in normalized)
     for row in visible:
         original = raw[identity(row)]
         value, reference = original["value"], original["reference_range"]
@@ -82,6 +88,16 @@ def check_projection(visible, normalized, columns, sections, european, reference
                 value = ValueGenerator._format_number_dp(numeric, 2, european)
             else:
                 value = ValueGenerator._format_number(numeric, european)
+                # Rebalancing prints exact tenths for these two components only
+                # when the same report contains total cholesterol in mg/dL.
+                if (row["value"] != value and simulation_revision >= 4 and has_total_cholesterol
+                        and row["loinc"] in {"2085-9", "2089-1"} and row["unit"] == "mg/dL"
+                        and Decimal(original["value"]) == Decimal(f"{numeric:.1f}")):
+                    value = ValueGenerator._format_number_dp(numeric, 1, european)
+        elif simulation_revision >= 4 and reference_policy == "simulated" and value in {"Negativo", "Positivo"}:
+            expected_flag = "A" if value == "Positivo" else None
+            if reference != "Negativo" or original["flag"] != expected_flag:
+                raise ValueError("Simulated binary reference or flag disagrees with the answer")
         elif simulation_revision >= 2 and reference_policy == "simulated" and (value.startswith("1:") or reference.startswith("< 1:")):
             dilution = re.fullmatch(r"1:([1-9][0-9]*)", value)
             threshold = re.fullmatch(r"< 1:([1-9][0-9]*)", reference)
@@ -101,6 +117,8 @@ def check_projection(visible, normalized, columns, sections, european, reference
 
 
 def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = False):
+    import pypdfium2
+    from PIL import Image
     from .report_composer import ReportComposer, _VETERINARY_KEYWORDS
     from .terminology import CATALOG_PATH, admitted_range, load_terms
     from .value_generator import ERRONEOUS_PLASMA_TERMS, NONACTIVE_283_ADDITIONS, PROJECT_RANGE_SOURCES, UNSUPPORTED_REPORTING_METHODS
@@ -207,9 +225,18 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                 raise ValueError("Out-of-order, duplicate or missing record")
             n_reports += 1
             pages = rec["pages"]
-            if type(pages) is not int or pages < 1 or rec["seed"] in seeds:
-                raise ValueError("Invalid page count or duplicate seed")
-            seeds.add(rec["seed"])
+            if type(pages) is not int or pages < 1:
+                raise ValueError("Invalid page count")
+            seed = rec["seed"]
+            if type(seed) is not int or seed in seeds or (revision >= 4 and not 0 <= seed < 2**53):
+                raise ValueError("Invalid or duplicate report seed")
+            seeds.add(seed)
+            if revision >= 4:
+                tier = rec["tier"]
+                if (fmt == "pdf" and tier is not None) or (fmt != "pdf" and (type(tier) is not int or tier not in range(5))):
+                    raise ValueError("Invalid degradation tier for output format")
+            if type(rec["result_count"]) is not int or rec["result_count"] <= 0:
+                raise ValueError("Invalid result_count")
             if ("reference_policy" in rec) != modern or (modern and rec["reference_policy"] != reference_policy):
                 raise ValueError("Manifest reference policy disagrees with metadata")
             images = []

@@ -10,6 +10,7 @@ import random
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ def strip_accents(text: str) -> str:
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
+@lru_cache(maxsize=2048)
 def _normalize_key(name: str) -> str:
     """Case-insensitive dedup key that also strips accents."""
     return strip_accents(name).strip().lower()
@@ -118,7 +120,7 @@ class SynonymEngine:
         # Some antigen labels are case-sensitive (e.g. Rh C vs c). Only
         # select an alternate spelling if it belongs to this code as written.
         display = chosen.display_name
-        attested = {e.display_name for e in entries}
+        attested = {e.display_name for e in entries} if apply_accent_variation or apply_case_variation else ()
         case_variant = accent_variant = "original"
         if apply_accent_variation and rng.random() < 0.20:
             alternate = strip_accents(display)

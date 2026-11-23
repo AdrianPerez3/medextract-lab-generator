@@ -212,3 +212,35 @@ def test_prior_default_resolution_and_explicit_extended_vocabulary(tmp_path):
     settings = json.loads((out / "metadata.json").read_text())
     assert settings["dpi"] == 300 and settings["numeric_vocabulary"] == "extended_simulation"
     assert settings["reference_policy"] == "omitted"
+
+
+def test_pdf_only_does_not_load_image_engines(tmp_path):
+    probe = (
+        "import sys, typing; import generate_complete_synthetic as g; "
+        "assert 'degradation_engine' in typing.get_type_hints(g._pdf_to_degraded_image); "
+        "assert g.main(sys.argv[1:]) == 0; "
+        "assert not {'cv2','numpy','pypdfium2'}.intersection(sys.modules)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe, "--count", "1", "--workers", "1",
+         "--format", "pdf", "--output", str(tmp_path / "pdf")],
+        cwd=SCRIPT.parent, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_automatic_workers_respect_image_cost_and_explicit_override(monkeypatch):
+    monkeypatch.setattr(os, "cpu_count", lambda: 128)
+    assert 1 <= generator.parse_args(["--dpi", "300"]).workers <= 4
+    assert generator.parse_args(["--dpi", "600"]).workers == 1
+    assert generator.parse_args(["--dpi", "600", "--workers", "6"]).workers == 6
+
+
+def test_custom_metadata_can_include_rank_as_exported_text(tmp_path):
+    import shutil
+
+    data = tmp_path / "inputs"
+    shutil.copytree(generator._DATA_DIR, data)
+    (data / "loinc_metadata.json").write_text('{"6690-2":{"COMMON_TEST_RANK":"1"}}')
+    result = cli(tmp_path / "run", "--data-dir", str(data), "--count", "1", "--format", "pdf")
+    assert result.returncode == 0, result.stderr
