@@ -116,6 +116,129 @@ def check_projection(visible, normalized, columns, sections, european, reference
         raise ValueError("Automated leukocyte differential percentages are inconsistent")
 
 
+_COORDINATE_FIELDS = ("test_name", "value", "unit", "reference_range", "flag", "method")
+_PAGE_SIZE_TOLERANCE = 0.001  # PDF serialization rounds the ReportLab page dimensions.
+_GRID_TOLERANCE = 1e-8  # Independently accumulated consecutive row baselines can differ by a few ULPs.
+
+
+def _point(value):
+    return type(value) is int or (type(value) is float and math.isfinite(value))
+
+
+def _check_box(box, width, height):
+    if not isinstance(box, list) or len(box) != 4 or not all(_point(value) for value in box):
+        raise ValueError("Invalid coordinate bbox")
+    left, top, right, bottom = box
+    if not (0 <= left < right <= width and 0 <= top < bottom <= height):
+        raise ValueError("Coordinate bbox lies outside the page or has no area")
+    return left, top, right, bottom
+
+
+def _check_coordinate_pages(receipt, record, labels, pdf_sizes, image_sizes):
+    expected_keys = {"schema_version", "report_id", "ground_truth_sha256", "coordinate_space", "pages"}
+    if (not isinstance(receipt, dict) or set(receipt) != expected_keys or type(receipt["schema_version"]) is not int
+            or receipt["schema_version"] != 1 or receipt["report_id"] != record["report_id"]
+            or receipt["coordinate_space"] != "pdf_points_top_left"
+            or receipt["ground_truth_sha256"] != record["sha256"][record["ground_truth"]]):
+        raise ValueError("Coordinate schema, identity, coordinate space or ground truth hash differs")
+    pages = receipt["pages"]
+    if not isinstance(pages, list) or len(pages) != record["pages"]:
+        raise ValueError("Coordinate page count differs from the manifest")
+    fields = _COORDINATE_FIELDS[:record["column_count"]]
+    index = 0
+    for number, page in enumerate(pages, 1):
+        page_keys = {"page", "width", "height", "rows"}
+        if image_sizes:
+            page_keys.add("image")
+        if (not isinstance(page, dict) or set(page) != page_keys
+                or type(page["page"]) is not int or page["page"] != number):
+            raise ValueError("Invalid coordinate page order or fields")
+        width, height = page["width"], page["height"]
+        # JPEG-only output retains no vector page. This renderer always uses A4.
+        expected = pdf_sizes[number - 1] if pdf_sizes else (210 * 72 / 25.4, 297 * 72 / 25.4)
+        if any(not _point(v) or not actual - _PAGE_SIZE_TOLERANCE <= v <= actual + _PAGE_SIZE_TOLERANCE
+               for v, actual in zip((width, height), expected)):
+            raise ValueError("Coordinate page dimensions disagree with the media")
+        if image_sizes:
+            image = page["image"]
+            w, h = image_sizes[number - 1]
+            if (not isinstance(image, dict) or set(image) != {"path", "width", "height"}
+                    or image["path"] != record["images"][number - 1]
+                    or type(image["width"]) is not int or type(image["height"]) is not int
+                    or (image["width"], image["height"]) != (w, h)):
+                raise ValueError("Coordinate image path or dimensions disagree with the decoded JPEG")
+        if not isinstance(page["rows"], list):
+            raise ValueError("Invalid coordinate page rows")
+        previous_bottom = 0
+        for row in page["rows"]:
+            if (not isinstance(row, dict) or set(row) != {"result_index", "loinc", "bbox", "cells"}
+                    or type(row["result_index"]) is not int or row["result_index"] != index
+                    or index >= len(labels) or row["loinc"] != labels[index]["loinc"]):
+                raise ValueError("Coordinate result index or LOINC differs from visible ground truth")
+            left, top, right, bottom = _check_box(row["bbox"], width, height)
+            if previous_bottom - top > _GRID_TOLERANCE:
+                raise ValueError("Coordinate rows overlap or are out of order")
+            previous_bottom = bottom
+            cells = row["cells"]
+            if not isinstance(cells, dict) or set(cells) != set(fields):
+                raise ValueError("Coordinate cell fields differ from the report columns")
+            edge = left
+            for field in fields:
+                x0, y0, x1, y1 = _check_box(cells[field], width, height)
+                if not (left <= x0 and x1 <= right and top <= y0 and y1 <= bottom):
+                    raise ValueError("Coordinate cells must fit inside the row")
+                if (x0 < edge or max(x0 - edge, y0 - top, bottom - y1) > _GRID_TOLERANCE):
+                    raise ValueError("Coordinate cells do not partition the row in column order")
+                edge = x1
+            if right - edge > _GRID_TOLERANCE:
+                raise ValueError("Coordinate cells do not cover the row")
+            index += 1
+    if index != len(labels):
+        raise ValueError("Coordinate rows do not cover every visible result")
+
+
+def _check_coordinate_pdf_text(path, pages, labels):
+    """Check the printed cell literals, including wrapped names, in vector coordinates."""
+    from bisect import bisect_right
+    from unicodedata import normalize
+    import pypdfium2
+    from pypdfium2 import raw
+
+    def literal(value):
+        # A narrow template can wrap even within a word.
+        return "".join(normalize("NFC", value or "").split())
+
+    with closing(pypdfium2.PdfDocument(path)) as doc:
+        for index, entry in enumerate(pages):
+            rows = entry["rows"]
+            fields = _COORDINATE_FIELDS[:len(rows[0]["cells"])] if rows else ()
+            bottoms = [row["bbox"][3] for row in rows]
+            edges = [[row["cells"][field][2] for field in fields] for row in rows]
+            observed = [[[] for _ in fields] for _ in rows]
+            with closing(doc[index]) as page, closing(page.get_textpage()) as text:
+                height = page.get_height()
+                # PDFium's rectangle extraction includes partly intersecting
+                # glyphs, sometimes copying punctuation into the next cell.
+                # Assign each printed glyph once using the center of its ink.
+                for position in range(text.count_chars()):
+                    char = chr(raw.FPDFText_GetUnicode(text, position))
+                    if char.isspace() or char == "\x00":
+                        continue
+                    left, bottom, right, top = text.get_charbox(position)
+                    x, y = (left + right) / 2, height - (bottom + top) / 2
+                    r = bisect_right(bottoms, y)
+                    if r == len(rows) or y < rows[r]["bbox"][1] or x < rows[r]["bbox"][0]:
+                        continue
+                    c = bisect_right(edges[r], x)
+                    if c < len(fields):
+                        observed[r][c].append(char)
+            for row, observed_cells in zip(rows, observed):
+                label = labels[row["result_index"]]
+                for field, chars in zip(fields, observed_cells):
+                    if literal("".join(chars)) != literal(label.get(field)):
+                        raise ValueError(f"Coordinate {field} cell disagrees with PDF text on page {index + 1}")
+
+
 def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = False):
     import pypdfium2
     from PIL import Image
@@ -134,6 +257,26 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                    or meta["profile_kind"] != "synthetic_generation_scenario" or type(meta["dpi"]) is not int
                    or not 72 <= meta["dpi"] <= 600):
         raise ValueError("Invalid render or simulation policy metadata")
+    coordinates = meta.get("coordinates", False)
+    if type(coordinates) is not bool or (coordinates and not modern):
+        raise ValueError("Invalid coordinates metadata")
+    coordinate_dir = root / "coordinates"
+    if coordinate_dir.is_symlink() or (coordinate_dir.exists() and not coordinate_dir.is_dir()):
+        raise ValueError("Invalid coordinates directory")
+    if not coordinates and coordinate_dir.exists() and any(coordinate_dir.iterdir()):
+        raise ValueError("Undeclared coordinates artifacts")
+    if coordinates:
+        if not coordinate_dir.is_dir():
+            raise ValueError("Missing coordinates directory")
+        if fmt != "pdf":
+            tiers = meta.get("tiers")
+            if (not isinstance(tiers, list) or len(tiers) != 5 or not all(_point(v) for v in tiers)
+                    or not 1 - 1e-8 <= tiers[0] <= 1 + 1e-8 or any(tiers[1:])):
+                raise ValueError("Coordinate images require clean tier 0")
+        dataset_root = root.resolve()
+        for name in ("metadata.json", "reports.jsonl", "coverage_report.json"):
+            if not (root / name).resolve().is_relative_to(dataset_root):
+                raise ValueError("Coordinate run manifest path leaves the dataset")
     reference_policy = meta.get("reference_policy", "simulated")
     revision = meta.get("simulation_revision", 1)
     if type(revision) is not int or revision not in {1, 2, 3, 4} or (revision >= 2 and not modern):
@@ -247,6 +390,19 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
             pdf = f"pdfs/{report_id}.pdf" if fmt in ("both", "pdf") else None
             if rec["pdf"] != pdf or rec["images"] != images:
                 raise ValueError("Unexpected PDF or page-image paths")
+            coordinate_path = f"coordinates/{report_id}.json"
+            if coordinates:
+                if rec.get("coordinates") != coordinate_path or (root / coordinate_path).is_symlink():
+                    raise ValueError("Unexpected coordinate path or symlink")
+                if images and (type(rec.get("tier")) is not int or rec["tier"] != 0):
+                    raise ValueError("Coordinate images require clean tier 0")
+                for name in [*images, *([pdf] if pdf else []), f"ground_truth/{report_id}.json",
+                             f"normalized_ground_truth/{report_id}.json", coordinate_path]:
+                    if not (root / name).resolve().is_relative_to(dataset_root):
+                        raise ValueError("Coordinate artifact path leaves the dataset")
+            elif "coordinates" in rec:
+                raise ValueError("Undeclared coordinates in manifest")
+            pdf_sizes, image_sizes = [], []
             if pdf:
                 with closing(pypdfium2.PdfDocument(root / pdf)) as doc:
                     if len(doc) != pages:
@@ -254,6 +410,8 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                     if modern:
                         for index in range(pages):
                             with closing(doc[index]) as page, closing(page.get_textpage()) as textpage:
+                                if coordinates:
+                                    pdf_sizes.append(page.get_size())
                                 text = textpage.get_text_bounded()
                             if ("DOCUMENTO SINTÉTICO DE ENTRENAMIENTO" not in text or
                                     ("INTERVALOS Y ALERTAS SIMULADOS" in text) != (reference_policy == "simulated")):
@@ -269,10 +427,14 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                             exact = millimeters * meta["dpi"] / 25.4
                             if not math.ceil(exact - 0.001) <= dimension <= math.ceil(exact + 0.001):
                                 raise ValueError(f"JPEG dimensions disagree with DPI for {image}")
+                    if coordinates:
+                        image_sizes.append(page.size)
                     page.load()  # Decode pixels as well as validating the JPEG header.
             artifacts = images + ([pdf] if pdf else []) + [
                 f"ground_truth/{report_id}.json", f"normalized_ground_truth/{report_id}.json"
             ]
+            if coordinates:
+                artifacts.append(coordinate_path)
             if set(rec["sha256"]) != set(artifacts):
                 raise ValueError("Digest inventory differs from expected files")
             for relative in artifacts:
@@ -313,6 +475,12 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                 raise ValueError("Visible and normalized analyte identities differ")
             check_projection(targets["ground_truth"][0]["results"], targets["normalized_ground_truth"][0]["results"],
                              rec["column_count"], rec["show_sections"], meta["european"], reference_policy, revision)
+            if coordinates:
+                receipt = read_json(root / coordinate_path)
+                labels = targets["ground_truth"][0]["results"]
+                _check_coordinate_pages(receipt, rec, labels, pdf_sizes, image_sizes)
+                if pdf:
+                    _check_coordinate_pdf_text(root / pdf, receipt["pages"], labels)
             for kind, row in zip(streams, records[1:]):
                 check_training_record(kind, row, images, targets["ground_truth"][0])
             profiles[rec["profile"]] += 1
@@ -328,6 +496,11 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
         directory = root / folder
         if directory.exists() and sum(1 for path in directory.iterdir() if path.is_file()) != expected:
             raise ValueError(f"Unexpected files in {folder}")
+    if coordinates:
+        # Every expected sidecar was checked above. Count all remaining entry
+        # types as well, so nested directories and dangling links cannot hide.
+        if sum(1 for _ in coordinate_dir.iterdir()) != count:
+            raise ValueError("Unexpected entries in coordinates directory")
     minimum = max(minimum, meta["min_loinc_coverage"])
     if any(code_counts[code] < minimum for code in eligible):
         raise ValueError(f"Minimum coverage of {minimum} not reached for every eligible code")

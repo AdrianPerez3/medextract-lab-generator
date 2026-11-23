@@ -26,6 +26,7 @@ The checked run produced **16 reports, 20 page images and 291 result rows coveri
 
 | If you want to… | Start here |
 |---|---|
+| Check whether an extractor attached each value to the correct test | [Generate row and cell coordinates](docs/usage.md#check-which-test-a-value-belongs-to) |
 | Plot code coverage, change the output format, simulate a camera capture or split training data | [Usage guide](docs/usage.md) |
 | Trace how rows become pages and labels | [Generator entry point](generate_complete_synthetic.py) and [implementation and tests](scripts/lib/) |
 | Inspect the bundled numeric inputs | [Demo data](src/paddle_ocr/dictionaries/data/) |

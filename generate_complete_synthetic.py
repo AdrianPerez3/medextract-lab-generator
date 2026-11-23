@@ -112,7 +112,23 @@ def _wrap_cell(value: str, width: float, font_name: str, size: float) -> list[st
         if pdfmetrics.stringWidth(line, font_name, size) <= width:
             lines.append(line)
         else:
-            lines.extend(part for _, part in wordSplit(line, width, font_name, size))
+            pieces = wordSplit(line, width, font_name, size)
+            if all(pdfmetrics.stringWidth(part, font_name, size) <= width + 1e-6 for _, part in pieces):
+                lines.extend(part for _, part in pieces)
+                continue
+            # ReportLab permits hanging punctuation at a line end. In a table
+            # that can place a literal colon from the assay in the value cell.
+            # Reflow only the overlong token for which its normal wrapping fails.
+            start, used = 0, 0.0
+            for index, char in enumerate(line):
+                advance = pdfmetrics.stringWidth(char, font_name, size)
+                if advance > width + 1e-6:
+                    raise ValueError(f"Table cell too narrow for glyph {char!r}")
+                if used + advance > width + 1e-6:
+                    lines.append(line[start:index])
+                    start, used = index, 0.0
+                used += advance
+            lines.append(line[start:])
     return lines or [""]
 
 
@@ -120,6 +136,8 @@ def render_simple_pdf(
     report: ReportContent,
     template_config: dict[str, Any],
     output_path: Path,
+    *,
+    coordinate_pages: list[dict[str, Any]] | None = None,
 ) -> int:
     """Render a lab report PDF using ReportLab.
 
@@ -131,6 +149,7 @@ def render_simple_pdf(
         report: Complete report content dataclass.
         template_config: Template configuration dict from TemplateEngine.
         output_path: Destination path for the PDF file.
+        coordinate_pages: Optional list receiving the table geometry for each page.
 
     Returns:
         Number of pages in the rendered PDF.
@@ -169,6 +188,15 @@ def render_simple_pdf(
         page_notice += " · INTERVALOS Y ALERTAS SIMULADOS"
     y = top
     page = 1
+    result_index = 0
+    if coordinate_pages is not None:
+        from reportlab.pdfbase.pdfmetrics import getAscentDescent
+
+        ascent, descent = getAscentDescent(font_family, body_size)
+        # Distribute line leading around the body's ascent and descent. This
+        # uses the actual baseline of the first painted line (after any heading).
+        above_baseline = (row_height + ascent + descent) / 2
+        coordinate_pages.append({"page": page, "width": w, "height": h, "rows": []})
 
     def new_page() -> None:
         nonlocal y, page
@@ -179,6 +207,8 @@ def render_simple_pdf(
         c.drawRightString(right_edge, bottom - 15, page_notice)
         c.showPage()
         page += 1
+        if coordinate_pages is not None:
+            coordinate_pages.append({"page": page, "width": w, "height": h, "rows": []})
         y = top
 
     # === HEADER ===
@@ -292,6 +322,19 @@ def render_simple_pdf(
                         c.drawCentredString(col_x[i] + col_widths[i] / 2, baseline, line)
                     else:
                         c.drawString(col_x[i] + 2, baseline, line)
+            if coordinate_pages is not None:
+                row_top = h - (y + above_baseline)
+                row_bottom = row_top + lines * row_height
+                cell_boxes = {
+                    field: [x, row_top, x + width, row_bottom]
+                    for field, x, width in zip(fields, col_x, col_widths)
+                }
+                coordinate_pages[-1]["rows"].append({
+                    "result_index": result_index, "loinc": test.loinc,
+                    "bbox": [col_x[0], row_top, col_x[-1] + col_widths[-1], row_bottom],
+                    "cells": cell_boxes,
+                })
+                result_index += 1
             y -= lines * row_height
             row_idx += 1
 
@@ -322,13 +365,19 @@ def _pdf_to_degraded_image(
     rng: random.Random,
     degradation_engine: _PageDegrader,
     dpi: int = 300,
+    *,
+    coordinate_pages: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Rasterize all pages in reading order, keeping the original first-page filename."""
     import cv2
     import pypdfium2 as pdfium
 
+    if coordinate_pages is not None and tier != 0:
+        raise ValueError("Coordinate annotations for page images require tier 0")
     image_paths = []
     with closing(pdfium.PdfDocument(str(pdf_path))) as pdf_doc:
+        if coordinate_pages is not None and len(coordinate_pages) != len(pdf_doc):
+            raise ValueError("Rendered PDF and coordinate page counts differ")
         for page_idx in range(len(pdf_doc)):
             with closing(pdf_doc[page_idx]) as page, closing(
                 page.render(scale=dpi / 72, force_bitmap_format=pdfium.raw.FPDFBitmap_BGR)
@@ -339,7 +388,13 @@ def _pdf_to_degraded_image(
                 filename = f"{report_id}{suffix}.jpg"
                 if not cv2.imwrite(str(img_dir / filename), degraded, [int(cv2.IMWRITE_JPEG_QUALITY), 85]):
                     raise OSError(f"Could not write generated JPEG: {img_dir / filename}")
-                image_paths.append(f"images/{filename}")
+                relative = f"images/{filename}"
+                image_paths.append(relative)
+                if coordinate_pages is not None:
+                    height, width = degraded.shape[:2]
+                    if (width, height) != (bitmap.width, bitmap.height):
+                        raise ValueError("Clean page coordinates require unchanged raster dimensions")
+                    coordinate_pages[page_idx]["image"] = {"path": relative, "width": width, "height": height}
     if not image_paths:
         raise ValueError("Cannot generate training images from a PDF with no pages")
     return {"image_path": image_paths[0], "image_paths": image_paths, "tier": tier}
@@ -358,6 +413,7 @@ class RenderJob:
     output: Path
     output_format: str
     dpi: int = 300
+    coordinates: bool = False
 
 
 def generate_one(job: RenderJob) -> dict[str, Any]:
@@ -367,7 +423,8 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
     keep_pdf = job.output_format in ("pdf", "both")
     pdf_path = job.output / ("pdfs" if keep_pdf else ".render") / f"{report_id}.pdf"
     try:
-        pages = render_simple_pdf(report, job.template, pdf_path)
+        coordinate_pages = [] if job.coordinates else None
+        pages = render_simple_pdf(report, job.template, pdf_path, coordinate_pages=coordinate_pages)
         if pages < 1 or not pdf_path.is_file() or not pdf_path.stat().st_size:
             raise ValueError("PDF renderer produced no pages")
         image_paths: list[str] = []
@@ -376,7 +433,7 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
 
             exported = _pdf_to_degraded_image(
                 pdf_path, job.output / "images", report_id, job.tier,
-                random.Random(job.seed), DegradationEngine(), dpi=job.dpi,
+                random.Random(job.seed), DegradationEngine(), dpi=job.dpi, coordinate_pages=coordinate_pages,
             )
             image_paths = exported["image_paths"]
             if len(image_paths) != pages or len(set(image_paths)) != pages:
@@ -399,8 +456,9 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
         files = [labels, normalized, *image_paths]
         if keep_pdf:
             files.append(pdf_path.relative_to(job.output).as_posix())
-        return {
-            "sha256": {name: _file_sha256(job.output / name) for name in files},
+        digests = {name: _file_sha256(job.output / name) for name in files}
+        record = {
+            "sha256": digests,
             "report_id": report_id,
             "seed": job.seed,
             "pages": pages,
@@ -416,6 +474,17 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
             "region": report.region,
             "result_count": len(visible["results"]),
         }
+        if coordinate_pages is not None:
+            name = f"coordinates/{report_id}.json"
+            sidecar = {
+                "schema_version": 1, "report_id": report_id, "coordinate_space": "pdf_points_top_left",
+                "ground_truth_sha256": digests[labels], "pages": coordinate_pages,
+            }
+            with (job.output / name).open("x", encoding="utf-8") as stream:
+                json.dump(sidecar, stream, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            record["coordinates"] = name
+            digests[name] = _file_sha256(job.output / name)
+        return record
     except Exception as exc:
         raise RuntimeError(f"{report_id}: {exc}") from exc
 
@@ -437,7 +506,7 @@ def _work_items(args, output, composer, template_engine):
         template = template_engine.select_template_config(rng, region=report.region)
         template["reference_policy"] = "simulated" if args.simulated_reference_ranges else "omitted"
         tier = None if args.format == "pdf" else rng.choices(range(5), weights=args.tiers, k=1)[0]
-        yield RenderJob(report, template, seed, tier, output, args.format, args.dpi)
+        yield RenderJob(report, template, seed, tier, output, args.format, args.dpi, args.coordinates)
 
 
 def _configure_image_worker():
@@ -490,6 +559,8 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
         raise ValueError("The input catalog contains no eligible LOINCs")
     workers = min(args.count, args.workers)
     directories = ["ground_truth", "normalized_ground_truth"]
+    if args.coordinates:
+        directories.append("coordinates")
     directories.append(".render" if args.format == "jpg" else "pdfs")
     if args.format != "pdf":
         directories.append("images")
@@ -585,6 +656,8 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
             "\n".join(sorted(eligible)).encode("utf-8")
         ).hexdigest(),
     }
+    if args.coordinates:
+        metadata["coordinates"] = True
     for filename, payload in (("coverage_report.json", coverage), ("metadata.json", metadata)):
         with (output / filename).open("x", encoding="utf-8") as stream:
             json.dump(payload, stream, ensure_ascii=False, indent=2)
@@ -608,6 +681,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--simulated-reference-ranges", action="store_true",
                         help="Print and export explicitly simulated reference intervals and flags")
     parser.add_argument("--format", choices=["pdf", "jpg", "both"], default="both")
+    parser.add_argument("--coordinates", action="store_true",
+                        help="Write PDF-point row and cell boxes (page images require --tiers 1,0,0,0,0)")
     parser.add_argument("--tiers", default="0.05,0.20,0.35,0.25,0.15",
                         help="Five comma-separated degradation probabilities totaling 1")
     parser.add_argument("--min-loinc-coverage", type=int, default=0,
@@ -635,6 +710,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if (len(args.tiers) != 5 or any(not math.isfinite(v) or v < 0 for v in args.tiers)
             or not math.isclose(sum(args.tiers), 1.0, abs_tol=1e-8)):
         parser.error("--tiers must contain five finite nonnegative probabilities totaling 1")
+    if args.coordinates and args.format != "pdf" and any(weight > 0 for weight in args.tiers[1:]):
+        parser.error("--coordinates for JPEG images requires --tiers 1,0,0,0,0")
     for mode in ("sft", "dpo", "grpo"):
         value = getattr(args, mode)
         if value and args.format == "pdf":
