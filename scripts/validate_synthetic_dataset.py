@@ -13,8 +13,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import os
 import sys
 from collections import Counter
+from collections.abc import Callable, Iterable
+from heapq import nsmallest
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +27,12 @@ from typing import Any
 # ---------------------------------------------------------------------------
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DATA_DIR = _PROJECT_ROOT / "src" / "paddle_ocr" / "dictionaries" / "data"
+
+if __package__:
+    from .lib.dataset_integrity import decode_json, read_json
+else:  # Direct invocation as python scripts/validate_synthetic_dataset.py.
+    sys.path.insert(0, str(_PROJECT_ROOT))
+    from scripts.lib.dataset_integrity import decode_json, read_json
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +69,24 @@ def load_reference_ranges(data_dir: Path = _DATA_DIR) -> dict[str, Any]:
         return json.load(f)
 
 
+class _Diagnostics:
+    """Keep exact counts and the bounded sample published by the legacy report."""
+
+    def __init__(self, limit: int = 50):
+        self.count = 0
+        self.examples: list[str] = []
+        self.limit = limit
+
+    def add(self, message: str) -> None:
+        self.count += 1
+        if len(self.examples) < self.limit:
+            self.examples.append(message)
+
+    def extend(self, messages: Iterable[str]) -> None:
+        for message in messages:
+            self.add(message)
+
+
 def check_ground_truth_schema(gt: dict[str, Any], filename: str) -> list[str]:
     """Validate ground truth JSON schema. Returns list of error strings."""
     errors: list[str] = []
@@ -72,14 +100,23 @@ def check_ground_truth_schema(gt: dict[str, Any], filename: str) -> list[str]:
         errors.append(f"{filename}: 'results' must be a nonempty list")
         return errors
 
-    required_fields = ["test_name", "value", "loinc"]
     for i, test in enumerate(results):
         if not isinstance(test, dict):
             errors.append(f"{filename}: results[{i}] is not a dict")
             continue
-        for field in required_fields:
+        for field in ("test_name", "loinc", "value"):
             if field not in test:
                 errors.append(f"{filename}: results[{i}] missing '{field}'")
+                continue
+            value = test[field]
+            if isinstance(value, str) and value.strip():
+                continue
+            if field == "value" and (type(value) is int or (type(value) is float and math.isfinite(value))):
+                continue
+            errors.append(f"{filename}: results[{i}] invalid '{field}'")
+        for field in ("unit", "panel"):
+            if test.get(field) is not None and not isinstance(test[field], str):
+                errors.append(f"{filename}: results[{i}] invalid '{field}'")
 
     return errors
 
@@ -106,7 +143,7 @@ def check_value_plausibility(
             continue
 
         loinc = test.get("loinc", "")
-        if loinc not in ref_ranges:
+        if not isinstance(loinc, str) or loinc not in ref_ranges:
             continue
 
         ref = ref_ranges[loinc]
@@ -119,10 +156,13 @@ def check_value_plausibility(
             continue
 
         try:
-            # Handle European format: "1.234,56" -> 1234.56
-            # Heuristic: if both . and , present, comma is decimal
+            # Mixed separators identify the decimal by its final position.
+            # A single point remains decimal for historical normalized JSON.
             if "," in val_str and "." in val_str:
-                numeric_val = float(val_str.replace(".", "").replace(",", "."))
+                if val_str.rfind(",") > val_str.rfind("."):
+                    numeric_val = float(val_str.replace(".", "").replace(",", "."))
+                else:
+                    numeric_val = float(val_str.replace(",", ""))
             elif "," in val_str:
                 numeric_val = float(val_str.replace(",", "."))
             else:
@@ -130,13 +170,17 @@ def check_value_plausibility(
         except (ValueError, TypeError):
             continue  # Non-numeric value -- skip
 
+        if not math.isfinite(numeric_val):
+            warnings.append(f"{filename}: LOINC {loinc} has a non-finite numeric value")
+            continue
         ref_min = ref.get("min")
         ref_max = ref.get("max")
 
         if ref_min is not None and ref_max is not None:
             # Allow generous tolerance for pathological profiles
-            lower_bound = float(ref_min) * 0.1
-            upper_bound = float(ref_max) * 10.0
+            low, high = float(ref_min), float(ref_max)
+            lower_bound = low * (10.0 if low < 0 else 0.1)
+            upper_bound = high * (0.1 if high < 0 else 10.0)
 
             if numeric_val < lower_bound or numeric_val > upper_bound:
                 warnings.append(
@@ -148,29 +192,32 @@ def check_value_plausibility(
     return warnings
 
 
-def check_jsonl_integrity(filepath: Path) -> tuple[int, list[str]]:
-    """Validate a JSONL file: every line must be valid JSON.
+def _scan_jsonl(filepath: Path, report_error: Callable[[str], None]) -> int:
+    if not filepath.is_file():
+        report_error(f"{filepath.name}: file not found")
+        return 0
 
-    Returns (line_count, list_of_error_strings).
-    """
-    if not filepath.exists():
-        return 0, [f"{filepath.name}: file not found"]
-
-    errors: list[str] = []
-    line_count = 0
-
-    with open(filepath, "r", encoding="utf-8") as f:
-        for i, line in enumerate(f, start=1):
-            stripped = line.strip()
-            if not stripped:
+    count = 0
+    with filepath.open("rb") as stream:
+        for number, line in enumerate(stream, 1):
+            if not line.strip():
                 continue
-            line_count += 1
+            count += 1
             try:
-                json.loads(stripped)
-            except json.JSONDecodeError as exc:
-                errors.append(f"{filepath.name}:{i}: invalid JSON: {exc}")
+                record = decode_json(line.decode("utf-8"))
+            except ValueError as exc:
+                report_error(f"{filepath.name}:{number}: invalid JSON: {exc}")
+                continue
+            if not isinstance(record, dict):
+                report_error(f"{filepath.name}:{number}: expected a JSON object")
+    return count
 
-    return line_count, errors
+
+def check_jsonl_integrity(filepath: Path) -> tuple[int, list[str]]:
+    """Return the number of nonblank JSONL records and all structural errors."""
+    errors: list[str] = []
+    count = _scan_jsonl(filepath, errors.append)
+    return count, errors
 
 
 # ---------------------------------------------------------------------------
@@ -200,11 +247,9 @@ def validate_dataset(
         return {"passed": False, "error": "Minimum coverage cannot be negative"}
     metadata = dataset_dir / "metadata.json"
     try:
-        settings = json.loads(metadata.read_text(encoding="utf-8")) if metadata.is_file() else {}
+        settings = read_json(metadata) if metadata.is_file() else {}
         version = settings.get("schema_version")
         if version is not None or (dataset_dir / "reports.jsonl").exists() or (dataset_dir / "normalized_ground_truth").exists():
-            if str(_PROJECT_ROOT) not in sys.path:
-                sys.path.insert(0, str(_PROJECT_ROOT))
             from scripts.lib.dataset_integrity import check_run
             report = check_run(dataset_dir, data_dir, min_loinc, verify_source)
             if expected_count is not None and report["reports"] != expected_count:
@@ -230,8 +275,12 @@ def validate_dataset(
         report["error"] = "ground_truth directory not found"
         return report
 
-    gt_files = sorted(gt_dir.glob("*.json"))
-    print(f"Found {len(gt_files)} ground truth files")
+    # One id table drives both the deterministic label scan and media matching.
+    # Bits 1 and 2 mark a PDF and an image respectively.
+    with os.scandir(gt_dir) as entries:
+        media_by_id = {entry.name[:-5]: 0 for entry in entries if entry.name.endswith(".json") and entry.is_file()}
+    report_count = len(media_by_id)
+    print(f"Found {report_count} ground truth files")
 
     # ---------------------------------------------------------------
     # 1. Load reference data
@@ -250,17 +299,17 @@ def validate_dataset(
     region_counter: Counter[str] = Counter()
     template_counter: Counter[str] = Counter()
     panel_counter: Counter[str] = Counter()
-    schema_errors: list[str] = []
-    plausibility_warnings: list[str] = []
+    schema_errors = _Diagnostics()
+    plausibility_warnings = _Diagnostics()
     total_tests = 0
     tests_with_unit = 0
 
-    for gt_file in gt_files:
+    for report_id in sorted(media_by_id):
+        gt_file = gt_dir / f"{report_id}.json"
         try:
-            with open(gt_file, "r", encoding="utf-8") as f:
-                gt = json.load(f)
-        except (json.JSONDecodeError, OSError) as exc:
-            schema_errors.append(f"{gt_file.name}: cannot read: {exc}")
+            gt = read_json(gt_file)
+        except (ValueError, OSError) as exc:
+            schema_errors.add(f"{gt_file.name}: cannot read: {exc}")
             continue
 
         # Schema check
@@ -282,19 +331,19 @@ def validate_dataset(
             total_tests += 1
 
             loinc = test.get("loinc", "")
-            if loinc:
+            if isinstance(loinc, str) and loinc:
                 loinc_counter[loinc] += 1
 
             test_name = test.get("test_name", "")
-            if test_name:
+            if isinstance(test_name, str) and test_name:
                 synonym_counter[test_name] += 1
 
             unit = test.get("unit", "")
-            if unit:
+            if isinstance(unit, str) and unit:
                 tests_with_unit += 1
 
             panel = test.get("panel", "")
-            if panel:
+            if isinstance(panel, str) and panel:
                 panel_counter[panel] += 1
 
     # ---------------------------------------------------------------
@@ -354,32 +403,48 @@ def validate_dataset(
     pdf_dir = dataset_dir / "pdfs"
     img_dir = dataset_dir / "images"
 
-    pdf_files = sorted(pdf_dir.glob("*.pdf")) if pdf_dir.exists() else []
-    img_files = sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.png")) if img_dir.exists() else []
-
-    small_pdfs = [f.name for f in pdf_files if f.stat().st_size < 1024]
-    empty_pdfs = [f.name for f in pdf_files if f.stat().st_size == 0]
-
-    # Check for orphaned ground truth (GT file exists but no PDF/image)
-    gt_ids = {f.stem for f in gt_files}
-    pdf_ids = {f.stem for f in pdf_files}
-    img_ids = {f.stem for f in img_files}
-    orphaned_gt = gt_ids - (pdf_ids | img_ids)
-
+    pdf_count = img_count = small_pdfs = empty_pdfs = 0
+    extra_pdf = extra_image = False
+    if pdf_dir.exists():
+        with os.scandir(pdf_dir) as entries:
+            for entry in entries:
+                if not entry.name.endswith(".pdf") or not entry.is_file():
+                    continue
+                pdf_count += 1
+                size = entry.stat().st_size
+                small_pdfs += size < 1024
+                empty_pdfs += size == 0
+                report_id = entry.name[:-4]
+                if report_id in media_by_id:
+                    media_by_id[report_id] |= 1
+                else:
+                    extra_pdf = True
+    if img_dir.exists():
+        with os.scandir(img_dir) as entries:
+            for entry in entries:
+                if not entry.name.endswith((".jpg", ".png")) or not entry.is_file():
+                    continue
+                img_count += 1
+                report_id = entry.name[:-4]
+                if report_id in media_by_id:
+                    media_by_id[report_id] |= 2
+                else:
+                    extra_image = True
+    orphaned_gt = sum(mask == 0 for mask in media_by_id.values())
     file_integrity = {
-        "pdfs": len(pdf_files),
-        "images": len(img_files),
-        "small_pdfs_under_1kb": len(small_pdfs),
-        "empty_pdfs": len(empty_pdfs),
-        "orphaned_ground_truth": len(orphaned_gt),
-        "ground_truth_files": len(gt_files),
+        "pdfs": pdf_count,
+        "images": img_count,
+        "small_pdfs_under_1kb": small_pdfs,
+        "empty_pdfs": empty_pdfs,
+        "orphaned_ground_truth": orphaned_gt,
+        "ground_truth_files": report_count,
     }
 
     # ---------------------------------------------------------------
     # 7. Training data JSONL validation
     # ---------------------------------------------------------------
     jsonl_stats: dict[str, Any] = {}
-    jsonl_errors: list[str] = []
+    jsonl_errors = _Diagnostics(limit=10)
 
     for jsonl_name in ["sft_train.jsonl", "dpo_train.jsonl", "grpo_train.jsonl"]:
         jsonl_path = dataset_dir / jsonl_name
@@ -387,33 +452,33 @@ def validate_dataset(
         if not jsonl_path.is_file() and settings.get(mode) is not True:
             jsonl_stats[jsonl_name] = {"present": False, "lines": 0, "errors": 0}
             continue
-        count, errs = check_jsonl_integrity(jsonl_path)
-        if count != len(gt_files):
-            errs.append(f"{jsonl_name}: expected {len(gt_files)} report rows, found {count}")
+        before = jsonl_errors.count
+        count = _scan_jsonl(jsonl_path, jsonl_errors.add)
+        if count != report_count:
+            jsonl_errors.add(f"{jsonl_name}: expected {report_count} report rows, found {count}")
         if settings.get(mode) is False:
-            errs.append(f"{jsonl_name}: stream present despite disabled export")
-        jsonl_stats[jsonl_name] = {"lines": count, "errors": len(errs)}
-        jsonl_errors.extend(errs)
+            jsonl_errors.add(f"{jsonl_name}: stream present despite disabled export")
+        jsonl_stats[jsonl_name] = {"lines": count, "errors": jsonl_errors.count - before}
 
     # ---------------------------------------------------------------
     # 8. Determine pass/fail
     # ---------------------------------------------------------------
-    if schema_errors:
-        failures.append(f"{len(schema_errors)} schema error(s)")
+    if schema_errors.count:
+        failures.append(f"{schema_errors.count} schema error(s)")
     if empty_pdfs:
-        failures.append(f"{len(empty_pdfs)} empty PDF(s)")
+        failures.append(f"{empty_pdfs} empty PDF(s)")
     if small_pdfs:
-        failures.append(f"{len(small_pdfs)} PDF(s) under 1KB")
-    if jsonl_errors:
-        failures.append(f"{len(jsonl_errors)} JSONL parse error(s)")
+        failures.append(f"{small_pdfs} PDF(s) under 1KB")
+    if jsonl_errors.count:
+        failures.append(f"{jsonl_errors.count} JSONL parse error(s)")
 
-    if settings.get("count", len(gt_files)) != len(gt_files):
+    if settings.get("count", report_count) != report_count:
         failures.append("Report count differs from legacy metadata")
     fmt = settings.get("format")
-    if ((fmt in ("both", "pdf") and gt_ids != pdf_ids)
-            or (fmt in ("both", "jpg") and gt_ids != img_ids)):
+    if ((fmt in ("both", "pdf") and (extra_pdf or any(not mask & 1 for mask in media_by_id.values())))
+            or (fmt in ("both", "jpg") and (extra_image or any(not mask & 2 for mask in media_by_id.values())))):
         failures.append("Legacy output format and media IDs disagree")
-    if not gt_files or not total_tests or orphaned_gt:
+    if not report_count or not total_tests or orphaned_gt:
         failures.append("Missing report, result or media files")
     if min_loinc and (under_min or uncovered):
         failures.append(f"Minimum coverage {min_loinc} was not reached")
@@ -429,13 +494,13 @@ def validate_dataset(
         warnings_list.append(
             f"{len(under_min)} LOINCs appear fewer than {min_loinc} times"
         )
-    if plausibility_warnings:
+    if plausibility_warnings.count:
         warnings_list.append(
-            f"{len(plausibility_warnings)} plausibility warning(s)"
+            f"{plausibility_warnings.count} plausibility warning(s)"
         )
     if orphaned_gt:
         warnings_list.append(
-            f"{len(orphaned_gt)} ground truth file(s) with no matching PDF/image"
+            f"{orphaned_gt} ground truth file(s) with no matching PDF/image"
         )
 
     passed = len(failures) == 0
@@ -449,19 +514,19 @@ def validate_dataset(
     print("  LEGACY STRUCTURAL VALIDATION")
     print(sep)
     print(f"  Dataset:             {dataset_dir}")
-    print(f"  Ground truth files:  {len(gt_files)}")
+    print(f"  Ground truth files:  {report_count}")
     print(f"  Total test results:  {total_tests}")
     print(f"  Tests with unit:     {tests_with_unit}")
     print()
     print("  -- File Integrity --")
-    print(f"  PDFs:                {len(pdf_files)}")
-    print(f"  Images (JPG/PNG):    {len(img_files)}")
+    print(f"  PDFs:                {pdf_count}")
+    print(f"  Images (JPG/PNG):    {img_count}")
     if small_pdfs:
-        print(f"  Small PDFs (<1KB):   {len(small_pdfs)}")
+        print(f"  Small PDFs (<1KB):   {small_pdfs}")
     if empty_pdfs:
-        print(f"  Empty PDFs (0B):     {len(empty_pdfs)}")
+        print(f"  Empty PDFs (0B):     {empty_pdfs}")
     if orphaned_gt:
-        print(f"  Orphaned GT files:   {len(orphaned_gt)}")
+        print(f"  Orphaned GT files:   {orphaned_gt}")
 
     print()
     print("  -- LOINC Coverage --")
@@ -523,8 +588,8 @@ def validate_dataset(
 
     print()
     print("  -- Schema Validation --")
-    print(f"  Schema errors:       {len(schema_errors)}")
-    print(f"  Plausibility warns:  {len(plausibility_warnings)}")
+    print(f"  Schema errors:       {schema_errors.count}")
+    print(f"  Plausibility warns:  {plausibility_warnings.count}")
 
     print()
     print("  -- Training Data (JSONL) --")
@@ -548,28 +613,28 @@ def validate_dataset(
         elif uncovered:
             print(f"\n  Uncovered LOINCs: {len(uncovered)} (too many to list)")
 
-        if schema_errors:
+        if schema_errors.count:
             print("\n  Schema errors (showing first 20):")
-            for err in schema_errors[:20]:
+            for err in schema_errors.examples[:20]:
                 print(f"    {err}")
-            if len(schema_errors) > 20:
-                print(f"    ... and {len(schema_errors) - 20} more")
+            if schema_errors.count > 20:
+                print(f"    ... and {schema_errors.count - 20} more")
 
-        if plausibility_warnings:
+        if plausibility_warnings.count:
             print("\n  Plausibility warnings (showing first 20):")
-            for warn in plausibility_warnings[:20]:
+            for warn in plausibility_warnings.examples[:20]:
                 print(f"    {warn}")
-            if len(plausibility_warnings) > 20:
-                print(f"    ... and {len(plausibility_warnings) - 20} more")
+            if plausibility_warnings.count > 20:
+                print(f"    ... and {plausibility_warnings.count - 20} more")
 
-        if jsonl_errors:
+        if jsonl_errors.count:
             print("\n  JSONL errors (showing first 10):")
-            for err in jsonl_errors[:10]:
+            for err in jsonl_errors.examples[:10]:
                 print(f"    {err}")
 
         if orphaned_gt:
             print("\n  Orphaned ground truth files (showing first 10):")
-            for gt_id in sorted(orphaned_gt)[:10]:
+            for gt_id in nsmallest(10, (key for key, mask in media_by_id.items() if mask == 0)):
                 print(f"    {gt_id}")
 
     # Final verdict
@@ -592,7 +657,7 @@ def validate_dataset(
     # 10. Build report dict
     # ---------------------------------------------------------------
     report.update({
-        "total_files": len(gt_files),
+        "total_files": report_count,
         "total_tests": total_tests,
         "tests_with_unit": tests_with_unit,
         "loinc_coverage": loinc_coverage,
@@ -602,12 +667,12 @@ def validate_dataset(
         "profile_distribution": dict(profile_counter.most_common()),
         "region_distribution": dict(region_counter.most_common()),
         "template_distribution": dict(template_counter.most_common()) if template_counter else {},
-        "schema_errors": len(schema_errors),
-        "schema_error_details": schema_errors[:50],
-        "plausibility_warnings": len(plausibility_warnings),
-        "plausibility_warning_details": plausibility_warnings[:50],
+        "schema_errors": schema_errors.count,
+        "schema_error_details": schema_errors.examples[:50],
+        "plausibility_warnings": plausibility_warnings.count,
+        "plausibility_warning_details": plausibility_warnings.examples[:50],
         "training_data": jsonl_stats,
-        "jsonl_errors": len(jsonl_errors),
+        "jsonl_errors": jsonl_errors.count,
         "failures": failures,
         "warnings": warnings_list,
         "passed": passed,

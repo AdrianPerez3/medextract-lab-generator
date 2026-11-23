@@ -552,6 +552,13 @@ def split_dataset(
             f"got {train_ratio} + {val_ratio} = {train_ratio + val_ratio}"
         )
 
+    source = Path(sft_path)
+    output_dir = Path(output_dir)
+    for name in ("sft_train.jsonl", "sft_val.jsonl", "sft_test.jsonl"):
+        target = output_dir / name
+        if target.exists() and target.samefile(source):
+            raise ValueError("Split output cannot overwrite its training source")
+
     # Read all lines
     with open(sft_path, "r", encoding="utf-8") as f:
         lines = [line for line in f if line.strip()]
@@ -566,7 +573,6 @@ def split_dataset(
     # Remainder goes to test
     n_test = total - n_train - n_val
 
-    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     splits = {

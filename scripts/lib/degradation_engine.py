@@ -89,16 +89,16 @@ class DegradationEngine:
             Degraded image with the same dtype and channel count as
             *image*.
         """
-        if tier < 0 or tier > 4:
+        if not isinstance(tier, (int, np.integer)) or not 0 <= tier <= 4:
             raise ValueError(f"tier must be 0-4, got {tier}")
 
-        # Ensure we work on a copy so the caller's array is untouched.
-        img = image.copy()
-
-        # Handle grayscale: convert to BGR, degrade, convert back.
-        grayscale = img.ndim == 2
-        if grayscale:
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        if (not isinstance(image, np.ndarray) or image.dtype != np.uint8
+                or image.ndim not in (2, 3) or (image.ndim == 3 and image.shape[2] != 3)
+                or not image.size):
+            raise ValueError("image must be a nonempty uint8 grayscale (H,W) or BGR (H,W,3) array")
+        # The first transform creates a new image (JPEG decode or perspective warp).
+        grayscale = image.ndim == 2
+        img = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR) if grayscale else image
 
         # Seed numpy from the stdlib rng for reproducibility.
         np_seed = rng.randint(0, 2**31 - 1)
@@ -319,8 +319,11 @@ def _jpeg_compress(image: np.ndarray, quality: int) -> np.ndarray:
     encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
     ok, buf = cv2.imencode(".jpg", image, encode_params)
     if not ok:
-        return image  # fallback: return unchanged
-    return cv2.imdecode(buf, cv2.IMREAD_COLOR)
+        raise OSError("Could not encode JPEG degradation")
+    decoded = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    if decoded is None:
+        raise OSError("Could not decode JPEG degradation")
+    return decoded
 
 
 def _perspective_warp(
@@ -424,6 +427,21 @@ def _rotate(
     )
 
 
+def _row_blocks(image: np.ndarray):
+    """Bound float scratch space to about 256k pixels per tile, in scan order."""
+    height, width = image.shape[:2]
+    rows_per_block = max(1, 262_144 // width)
+    for start in range(0, height, rows_per_block):
+        yield slice(start, min(start + rows_per_block, height))
+
+
+def _squared_radius(x_squared, rows, cy, max_r):
+    """Squared normalized distance, preserving the simulator's float32 rounding."""
+    y = np.arange(rows.start, rows.stop, dtype=np.float32)[:, None] - cy
+    distance = np.sqrt(x_squared + y ** 2) / max_r
+    return distance ** 2
+
+
 def _corner_blur(
     image: np.ndarray,
     np_rng: np.random.RandomState,
@@ -446,22 +464,15 @@ def _corner_blur(
     cy, cx = h / 2.0, w / 2.0
     max_r = math.sqrt(cx**2 + cy**2)
 
-    # Distance map: 0 at centre, 1 at corners
-    xx = np.arange(w, dtype=np.float32)[None, :]
-    yy = np.arange(h, dtype=np.float32)[:, None]
-    dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / max_r
-    # Quadratic falloff: emphasise corners, keep centre sharp
-    dist = np.clip(dist**2, 0, 1)
-
-    # Gaussian blur with kernel size derived from sigma
-    k = int(corner_sigma * 6) | 1  # ensure odd
-    k = max(k, 3)
+    x_squared = (np.arange(w, dtype=np.float32) - cx) ** 2
+    k = max(3, int(corner_sigma * 6) | 1)
     blurred = cv2.GaussianBlur(image, (k, k), corner_sigma)
-
-    # Alpha blend: centre = original, corners = blurred
-    alpha = dist[..., np.newaxis].astype(np.float32)
-    result = image.astype(np.float32) * (1.0 - alpha) + blurred.astype(np.float32) * alpha
-    return result.astype(np.uint8)
+    for rows in _row_blocks(image):
+        alpha = np.clip(_squared_radius(x_squared, rows, cy, max_r), 0, 1)[..., None]
+        # GaussianBlur has already read the full image. Its tile can now
+        # receive the blended result without shifting later blur boundaries.
+        blurred[rows] = image[rows] * (1.0 - alpha) + blurred[rows] * alpha
+    return blurred
 
 
 def _color_temperature(
@@ -477,14 +488,12 @@ def _color_temperature(
     direction = rng.choice([-1, 1])
     amount = rng.uniform(0.01, shift_k / 10000.0) * direction
 
-    result = image.astype(np.float32)
-    # BGR channel order: [0]=Blue, [1]=Green, [2]=Red
-    # Warm: boost R, reduce B.  Cool: boost B, reduce R.
-    result[:, :, 2] *= 1.0 + amount   # Red
-    result[:, :, 0] *= 1.0 - amount   # Blue
-    # Green stays mostly stable; add a tiny shift for realism
-    result[:, :, 1] *= 1.0 + amount * 0.1
-    return np.clip(result, 0, 255).astype(np.uint8)
+    # Only 256 input values exist per channel. Apply the three float32
+    # multipliers to those levels once instead of allocating a float image.
+    levels = np.arange(256, dtype=np.float32)[:, None]
+    scales = np.array([1.0 - amount, 1.0 + amount * 0.1, 1.0 + amount], dtype=np.float32)
+    table = np.clip(levels * scales, 0, 255).astype(np.uint8)
+    return cv2.LUT(image, table[:, None, :])
 
 
 def _vignette(
@@ -505,15 +514,12 @@ def _vignette(
     cy = h / 2.0 + rng.uniform(-h * 0.02, h * 0.02)
     max_r = math.sqrt((w / 2.0) ** 2 + (h / 2.0) ** 2)
 
-    xx = np.arange(w, dtype=np.float32)[None, :]
-    yy = np.arange(h, dtype=np.float32)[:, None]
-    dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / max_r
-
-    vignette_mask = 1.0 - strength * (dist**2)
-    vignette_mask = np.clip(vignette_mask, 0, 1)
-
-    result = image.astype(np.float32) * vignette_mask[..., np.newaxis]
-    return np.clip(result, 0, 255).astype(np.uint8)
+    x_squared = (np.arange(w, dtype=np.float32) - cx) ** 2
+    result = np.empty_like(image)
+    for rows in _row_blocks(image):
+        mask = np.clip(1.0 - strength * _squared_radius(x_squared, rows, cy, max_r), 0, 1)
+        result[rows] = image[rows] * mask[..., None]
+    return result
 
 
 def _gaussian_noise(
@@ -524,15 +530,20 @@ def _gaussian_noise(
     For high sigma (>15), uses multiplicative noise to preserve relative
     brightness and avoid blown-out highlights from additive clipping.
     """
-    if sigma > 15:
-        # Multiplicative noise (preserves relative brightness)
-        noise_mult = np_rng.normal(1.0, sigma / 100.0, image.shape).astype(np.float32)
-        noisy = image.astype(np.float32) * noise_mult
-    else:
-        # Standard additive noise for low sigma
-        noise = np_rng.normal(0.0, sigma, image.shape).astype(np.float32)
-        noisy = image.astype(np.float32) + noise
-    return np.clip(noisy, 0, 255).astype(np.uint8)
+    multiplicative = sigma > 15
+    mean, sd = (1.0, sigma / 100.0) if multiplicative else (0.0, sigma)
+    result = np.empty_like(image)
+    for rows in _row_blocks(image):
+        tile = image[rows]
+        # RandomState keeps its cached normal across calls. Row order preserves
+        # the full-frame noise sequence, including at odd tile boundaries.
+        noise = np_rng.normal(mean, sd, tile.shape).astype(np.float32)
+        if multiplicative:
+            noise *= tile
+        else:
+            noise += tile
+        result[rows] = np.clip(noise, 0, 255, out=noise)
+    return result
 
 
 def _salt_pepper_noise(
@@ -576,33 +587,23 @@ def _shadow_overlay(
     point of each shadow (lower = darker).
     """
     h, w = image.shape[:2]
-    result = image.astype(np.float32)
-
+    masks = []
     for _ in range(count):
-        # Create a gradient mask from a random direction.
-        mask = np.ones((h, w), dtype=np.float32)
-        darkness = rng.uniform(darkness_range[0], darkness_range[1])
+        darkness = rng.uniform(*darkness_range)
+        horizontal = rng.random() < 0.5
+        size = w if horizontal else h
+        start, end = rng.randint(0, size // 2), rng.randint(size // 2, size)
+        gradient = np.ones(size, dtype=np.float32)
+        gradient[start:end] = np.linspace(1.0, darkness, end - start)
+        masks.append((horizontal, gradient))
 
-        if rng.random() < 0.5:
-            # Horizontal gradient shadow
-            start_col = rng.randint(0, w // 2)
-            end_col = rng.randint(w // 2, w)
-            shadow_width = end_col - start_col
-            if shadow_width > 0:
-                gradient = np.linspace(1.0, darkness, shadow_width)
-                mask[:, start_col:end_col] = gradient[np.newaxis, :]
-        else:
-            # Vertical gradient shadow
-            start_row = rng.randint(0, h // 2)
-            end_row = rng.randint(h // 2, h)
-            shadow_height = end_row - start_row
-            if shadow_height > 0:
-                gradient = np.linspace(1.0, darkness, shadow_height)
-                mask[start_row:end_row, :] = gradient[:, np.newaxis]
-
-        result *= mask[:, :, np.newaxis]
-
-    return np.clip(result, 0, 255).astype(np.uint8)
+    result = np.empty_like(image)
+    for rows in _row_blocks(image):
+        tile = image[rows].astype(np.float32)
+        for horizontal, gradient in masks:
+            tile *= gradient[None, :, None] if horizontal else gradient[rows, None, None]
+        result[rows] = np.clip(tile, 0, 255, out=tile)
+    return result
 
 
 def _motion_blur(
@@ -718,23 +719,19 @@ def _lighting_gradient(image: np.ndarray, rng: random.Random) -> np.ndarray:
     direction = rng.choice(["tl_br", "tr_bl", "t_b", "l_r"])
     dark_level = rng.uniform(0.5, 0.75)
 
-    if direction == "tl_br":
-        xs = np.linspace(1.0, dark_level, w)
-        ys = np.linspace(1.0, dark_level, h)
-        mask = np.outer(ys, xs).astype(np.float32)
-    elif direction == "tr_bl":
+    if direction == "tr_bl":
         xs = np.linspace(dark_level, 1.0, w)
-        ys = np.linspace(1.0, dark_level, h)
-        mask = np.outer(ys, xs).astype(np.float32)
     elif direction == "t_b":
-        ys = np.linspace(1.0, dark_level, h)
-        mask = np.tile(ys[:, np.newaxis], (1, w)).astype(np.float32)
-    else:  # l_r
+        xs = np.ones(1)
+    else:
         xs = np.linspace(1.0, dark_level, w)
-        mask = np.tile(xs[np.newaxis, :], (h, 1)).astype(np.float32)
-
-    result = image.astype(np.float32) * mask[:, :, np.newaxis]
-    return np.clip(result, 0, 255).astype(np.uint8)
+    ys = np.ones(h) if direction == "l_r" else np.linspace(1.0, dark_level, h)
+    result = np.empty_like(image)
+    for rows in _row_blocks(image):
+        # Form the original float64 product before reducing precision.
+        mask = (ys[rows, None] * xs).astype(np.float32)
+        result[rows] = image[rows] * mask[..., None]
+    return result
 
 
 def _resolution_loss(image: np.ndarray, scale_factor: float) -> np.ndarray:

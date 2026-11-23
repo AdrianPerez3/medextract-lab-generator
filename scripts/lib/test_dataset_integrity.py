@@ -275,3 +275,118 @@ def test_checks_jpeg_pixels_after_matching_digest(tmp_path, clean):
     write(manifest, record)
     with pytest.raises(ValueError, match="truncated"):
         check_run(root, DATA, 0)
+
+
+def test_current_binary_reference_and_flag_are_reconciled():
+    from scripts.lib.dataset_integrity import check_projection
+
+    base = {"test_name": "Simulated binary", "value": "Positivo", "unit": "", "reference_range": "Negativo",
+            "flag": "A", "loinc": "demo", "panel": ""}
+    for value, reference, flag in (("Positivo", "Negativo", "A"), ("Negativo", "Negativo", None)):
+        row = {**base, "value": value, "reference_range": reference, "flag": flag}
+        check_projection([row], [row], 5, False, True, "simulated", 4)
+    for value, reference, flag in (("Positivo", "Negativo", None), ("Negativo", "Negativo", "A"),
+                                   ("Positivo", "Positivo", "A")):
+        row = {**base, "value": value, "reference_range": reference, "flag": flag}
+        with pytest.raises(ValueError, match="binary"):
+            check_projection([row], [row], 5, False, True, "simulated", 4)
+        # Revisions before the binary answer policy retain their old rules.
+        check_projection([row], [row], 5, False, True, "simulated", 3)
+
+
+@pytest.mark.parametrize(("field", "invalid"), [("seed", None), ("seed", True), ("seed", 2**53),
+                                                ("tier", 6), ("tier", False), ("result_count", True)])
+def test_current_manifest_scalar_types(tmp_path, clean, field, invalid):
+    root = tmp_path / "run"
+    shutil.copytree(clean, root)
+    path = root / "reports.jsonl"
+    record = read(path)
+    record[field] = invalid
+    write(path, record)
+    with pytest.raises(ValueError, match=field):
+        check_run(root, DATA, 0)
+
+
+def test_legacy_plausibility_handles_sign_grouping_and_nonfinite():
+    from scripts.validate_synthetic_dataset import check_value_plausibility
+
+    def warnings(value, low, high):
+        return check_value_plausibility({"results": [{"loinc": "test", "value": value}]},
+                                        {"test": {"min": low, "max": high}}, "test.json")
+
+    assert not warnings("-7.5", -10, -5)
+    assert not warnings("-75", -10, -5)
+    assert warnings("-101", -10, -5)
+    assert warnings("-0.1", -10, -5)
+    assert warnings("1,234.50", 1, 10)
+    assert warnings("1.234,50", 1, 10)
+    assert not warnings("1.234", 1, 10)  # Historical normalized JSON uses decimal points.
+    for value in ("NaN", "Infinity", "-inf", "1e400"):
+        assert "finite" in warnings(value, 1, 10)[0]
+
+
+def test_legacy_cli_reports_bad_row_fields_and_object_stream_errors(tmp_path, capsys):
+    from scripts import validate_synthetic_dataset as validator
+
+    (tmp_path / "ground_truth").mkdir()
+    (tmp_path / "images").mkdir()
+    shutil.copyfile(DATA.parents[3] / "examples/report.jpg", tmp_path / "images/RPT_000000.jpg")
+    # Preserve counts even if the printed report only retains 50 details.
+    rows = [{"test_name": "Test", "value": 1, "loinc": [], "panel": {}} for _ in range(40)]
+    rows.append({"loinc": "718-7", "value": None, "test_name": " "})
+    write(tmp_path / "ground_truth/RPT_000000.json", {"results": rows})
+    (tmp_path / "sft_train.jsonl").write_text("null\n")
+    assert validator.main(["--dataset", str(tmp_path)]) == 1
+    report = read(tmp_path / "validation_report.json")
+    assert not report["passed"] and report["total_files"] == 1
+    assert report["schema_errors"] == 82 and len(report["schema_error_details"]) == 50
+    assert report["jsonl_errors"] == 1
+    assert report["training_data"]["sft_train.jsonl"] == {"lines": 1, "errors": 1}
+    assert "RESULT: VALIDATION FAILED" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("code", ["2085-9", "2089-1"])
+@pytest.mark.parametrize("european", [True, False])
+@pytest.mark.parametrize("policy", ["omitted", "simulated"])
+def test_rebalanced_cholesterol_display(code, european, policy):
+    from scripts.lib.dataset_integrity import check_projection
+
+    ref = "100.0 - 200.0" if policy == "simulated" else ""
+    printed_ref = "100 - 200" if policy == "simulated" else ""
+    total = {"test_name": "Total", "loinc": "2093-3", "unit": "mg/dL", "value": "200.0",
+             "reference_range": ref, "flag": None, "panel": ""}
+    component = {**total, "test_name": "Component", "loinc": code, "value": "125.0"}
+    printed_total = {**total, "value": "200", "reference_range": printed_ref}
+    tenth = "125,0" if european else "125.0"
+    printed_component = {**component, "value": tenth, "reference_range": printed_ref}
+
+    def check(raw, visible):
+        check_projection(visible, raw, 5, False, european, policy, 4)
+
+    check([total, component], [printed_total, printed_component])
+    check([total, component], [printed_total, {**printed_component, "value": "125"}])
+
+    def reject(raw, visible):
+        with pytest.raises(ValueError, match="Visible result"):
+            check(raw, visible)
+
+    reject([component], [printed_component])  # No compatible total for rebalancing.
+    reject([{**total, "unit": "mmol/L"}, component], [{**printed_total, "unit": "mmol/L"}, printed_component])
+    for changes in ({"loinc": "2571-8"}, {"unit": "mmol/L"}):
+        reject([total, {**component, **changes}], [printed_total, {**printed_component, **changes}])
+    reject([total, {**component, "value": "125.0000000000000001"}], [printed_total, printed_component])
+    reject([total, component], [printed_total, {**printed_component, "value": "125.0" if european else "125,0"}])
+    reject([total, component], [printed_total, {**printed_component, "value": "126,0" if european else "126.0"}])
+
+
+def test_training_jsonl_rejects_nonstandard_numbers_and_keeps_scanning_legacy(tmp_path):
+    from scripts.lib.dataset_integrity import json_lines
+    from scripts.validate_synthetic_dataset import check_jsonl_integrity
+
+    path = tmp_path / "sft_train.jsonl"
+    path.write_bytes(b'{"ok": true}\n{"nested": [NaN]}\n{"bad": "\xff"}\n{"ok": true}\n')
+    count, errors = check_jsonl_integrity(path)
+    assert count == 4 and len(errors) == 2
+    assert "sft_train.jsonl:2" in errors[0] and "sft_train.jsonl:3" in errors[1]
+    with pytest.raises(ValueError, match="sft_train.jsonl:2: invalid JSON"):
+        list(json_lines(path))

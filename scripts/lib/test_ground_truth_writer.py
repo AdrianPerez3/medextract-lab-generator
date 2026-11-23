@@ -821,3 +821,13 @@ class TestEdgeCases:
         record = json.loads(line)
         content = json.loads(record["messages"][2]["content"])
         assert len(content["results"]) == 32
+
+
+def test_split_dataset_preserves_source_if_it_is_also_a_target(tmp_path):
+    source = tmp_path / "sft_train.jsonl"
+    original = b'{"report":1}\n{"report":2}\n'
+    source.write_bytes(original)
+    with pytest.raises(ValueError, match="source"):
+        split_dataset(source, tmp_path)
+    assert source.read_bytes() == original
+    assert list(tmp_path.iterdir()) == [source]

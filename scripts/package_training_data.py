@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import math
 import os
-import json
 import random
 import sys
+from array import array
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -82,6 +84,16 @@ def validate_jsonl_lines(lines: list[str], source_name: str) -> list[str]:
     return errors
 
 
+def _split_percentages(train_pct, val_pct):
+    remainder = 100 - (train_pct + val_pct)
+    if math.isclose(remainder, 0, rel_tol=0, abs_tol=1e-10):
+        remainder = 0.0
+    values = (train_pct, val_pct, remainder)
+    if any(not math.isfinite(v) or not 0 <= v <= 100 for v in values):
+        raise ValueError("Split percentages must be finite, nonnegative and total 100")
+    return values
+
+
 def split_lines(
     lines: list[str],
     train_pct: float,
@@ -101,6 +113,7 @@ def split_lines(
     Returns:
         Dict with keys "train", "val", "test", each mapping to a list of lines.
     """
+    _split_percentages(train_pct, val_pct)
     rng = random.Random(seed)
     shuffled = list(lines)
     rng.shuffle(shuffled)
@@ -140,6 +153,21 @@ def write_jsonl(filepath: Path, lines: list[str]) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _check_source_unchanged(path, original):
+    current = path.stat()
+    if (not os.path.samestat(original, current) or original.st_size != current.st_size
+            or original.st_mtime_ns != current.st_mtime_ns):
+        raise ValueError(f"Training source changed while packaging {path.name}")
+
+
+def _remove_created_file(path, created):
+    try:
+        if os.path.samestat(path.lstat(), created):
+            path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def split_jsonl_file(
     source_path: Path,
     output_dir: Path,
@@ -166,47 +194,62 @@ def split_jsonl_file(
     Returns:
         Stats dict, or None if the source file is missing.
     """
+    _split_percentages(train_pct, val_pct)
     if not source_path.exists():
         return None
 
-    # Read all lines
-    lines = read_jsonl(source_path)
-    total = len(lines)
-
-    if total == 0:
-        raise ValueError(f"Empty training source: {source_path}")
-    errors = validate_jsonl_lines(lines, source_path.name)
-    if errors:
-        raise ValueError(errors[0])
     if source_path.resolve().parent == output_dir.resolve():
         raise ValueError("Split output cannot overwrite its training source")
 
-    # Split
-    splits = split_lines(lines, train_pct, val_pct, seed)
+    # Keep byte boundaries and a permutation of nonempty row numbers. Payloads
+    # stay on disk, including for multi-gigabyte legacy training streams.
+    boundaries = array("Q", [0])
+    order = array("Q")
+    split_stats = {}
+    newline = os.linesep.encode("ascii")
+    with source_path.open(encoding="utf-8", newline="") as source, ExitStack() as rollback:
+        original = os.fstat(source.fileno())
+        for number, line in enumerate(source, 1):
+            boundaries.append(boundaries[-1] + len(line.encode("utf-8")))
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line, parse_constant=_invalid_constant)
+                if not isinstance(obj, dict):
+                    raise ValueError("Expected a JSON object")
+            except ValueError as exc:
+                raise ValueError(f"{source_path.name}:{number}: {exc}") from exc
+            order.append(number - 1)
+        total = len(order)
+        if not total:
+            raise ValueError(f"Empty training source: {source_path}")
 
-    # Write output files
-    output_dir.mkdir(parents=True, exist_ok=True)
-    split_stats: dict[str, dict[str, Any]] = {}
-
-    for split_name, split_lines_data in splits.items():
-        out_path = output_dir / f"{prefix}_{split_name}.jsonl"
-        n_written = write_jsonl(out_path, split_lines_data)
-        file_size = out_path.stat().st_size
-
-        split_stats[split_name] = {
-            "lines": n_written,
-            "file": out_path.name,
-            "size_bytes": file_size,
-            "size_kb": round(file_size / 1024, 1),
-        }
+        random.Random(seed).shuffle(order)
+        train_end = int(total * train_pct / 100)
+        val_end = train_end + int(total * val_pct / 100)
+        # The text pass preserved LF, CR and CRLF, so byte offsets are valid on
+        # every platform. Reuse the same open file for the shuffled reads.
+        raw = source.buffer
+        output_dir.mkdir(parents=True, exist_ok=True)
+        for split, start, end in (("train", 0, train_end), ("val", train_end, val_end), ("test", val_end, total)):
+            path = output_dir / f"{prefix}_{split}.jsonl"
+            with path.open("xb") as target:
+                rollback.callback(_remove_created_file, path, os.fstat(target.fileno()))
+                for i in range(start, end):
+                    index = order[i]
+                    raw.seek(boundaries[index])
+                    data = raw.read(boundaries[index + 1] - boundaries[index])
+                    target.write(data.rstrip(b"\r\n") + newline)
+            size = path.stat().st_size
+            split_stats[split] = {"lines": end - start, "file": path.name, "size_bytes": size,
+                                  "size_kb": round(size / 1024, 1)}
+        _check_source_unchanged(source_path, original)
+        rollback.pop_all()
 
     return {
-        "source": source_path.name,
-        "total_lines": total,
-        "splits": {k: v["lines"] for k, v in split_stats.items()},
-        "split_details": split_stats,
-        "validation_errors": len(errors),
-        "validation_error_details": errors[:20] if errors else [],
+        "source": source_path.name, "total_lines": total,
+        "splits": {split: item["lines"] for split, item in split_stats.items()},
+        "split_details": split_stats, "validation_errors": 0, "validation_error_details": [],
     }
 
 
@@ -280,7 +323,7 @@ def _v2_splits(dataset: Path, metadata: dict, train_pct: float, val_pct: float, 
             join(rid, (field, digest))
             if field == "ground_truth":
                 targets[rid] = digest
-    if not parents or len(parents) != metadata["count"]:
+    if not parents or type(metadata["count"]) is not int or len(parents) != metadata["count"]:
         raise ValueError("Report manifest count differs from metadata")
     groups = {}
     for rid in parents:
@@ -312,6 +355,7 @@ def _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, ta
     offsets = {}
     details = {}
     with source.open("rb") as stream:
+        original = os.fstat(stream.fileno())
         while True:
             offset = stream.tell()
             line = stream.readline()
@@ -331,7 +375,7 @@ def _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, ta
                 if (not isinstance(rejected, dict) or not isinstance(rejected.get("results"), list)
                         or rejected == chosen):
                     raise ValueError(f"Invalid DPO negative for {rid}")
-            offsets[rid] = offset
+            offsets[rid] = (offset, hashlib.sha256(line).digest())
         if len(offsets) != len(image_ids):
             raise ValueError(f"Missing reports in {source.name}")
         for split, ids in splits.items():
@@ -339,15 +383,18 @@ def _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, ta
             path = staging / name
             with path.open("x", encoding="utf-8") as output:
                 for rid in ids:
-                    stream.seek(offsets[rid])
-                    record = json.loads(stream.readline(), parse_constant=_invalid_constant)
-                    if image_ids.get(tuple(record["images"])) != rid:
+                    offset, expected = offsets[rid]
+                    stream.seek(offset)
+                    raw = stream.readline()
+                    if hashlib.sha256(raw).digest() != expected:
                         raise ValueError(f"{source.name} changed while packaging {rid}")
+                    record = json.loads(raw, parse_constant=_invalid_constant)
                     record["images"] = [(image_prefix / image).as_posix() for image in record["images"]]
                     output.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
             size = path.stat().st_size
             details[split] = {"file": name, "lines": len(ids),
                               "size_bytes": size, "size_kb": round(size / 1024, 1)}
+        _check_source_unchanged(source, original)
     return {"source": source.name, "total_lines": len(offsets),
             "splits": {k: len(v) for k, v in splits.items()}, "split_details": details,
             "validation_errors": 0, "validation_error_details": []}
@@ -357,19 +404,16 @@ def package_dataset(dataset_dir: Path, output_dir: Path | None, train_pct: float
                     val_pct: float, seed: int) -> dict[str, Any]:
     dataset = dataset_dir.resolve()
     destination = output_dir.absolute() if output_dir is not None else dataset / "splits"
-    remainder = 100 - (train_pct + val_pct)
-    if math.isclose(remainder, 0, rel_tol=0, abs_tol=1e-10):
-        remainder = 0.0
-    percentages = (train_pct, val_pct, remainder)
-    if any(not math.isfinite(v) or v < 0 or v > 100 for v in percentages):
-        raise ValueError("Split percentages must be finite, nonnegative and total 100")
+    percentages = _split_percentages(train_pct, val_pct)
     if not dataset.is_dir() or destination.resolve() == dataset:
         raise ValueError("Specify a dataset directory and a separate split destination")
     formats = ("sft", "dpo", "grpo")
     metadata_path = dataset / "metadata.json"
     meta = json.loads(metadata_path.read_bytes()) if metadata_path.exists() else {}
+    if not isinstance(meta, dict):
+        raise ValueError("Generator metadata must be a JSON object")
     schema = meta.get("schema_version", 1)
-    if (dataset / "reports.jsonl").exists() and schema != 2:
+    if ((dataset / "reports.jsonl").exists() or (dataset / "normalized_ground_truth").exists()) and schema != 2:
         raise ValueError("A report manifest requires schema-v2 generator metadata")
     if type(schema) is not int or schema not in (1, 2):
         raise ValueError(f"Unsupported generator schema: {schema}")
