@@ -1,0 +1,157 @@
+{
+  "results": [
+    {
+      "test_name": "Leucocitos:Concentración de número:Punto temporal:Sangre:Qn:Contaje automático",
+      "value": "6,79",
+      "unit": "10*3/uL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "6690-2",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "Hematíes:Concentración de número:Punto temporal:Sangre:Qn:Contaje automático",
+      "value": "4,87",
+      "unit": "10*6/uL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "789-8",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "Hemoglobin [Mass/volume] in Blood",
+      "value": "14,2",
+      "unit": "g/dL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "718-7",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "Hematocrit Auto (Bld) [Volume fraction]",
+      "value": "39,6",
+      "unit": "%",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "4544-3",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "MCV RBC Auto",
+      "value": "81,3",
+      "unit": "fL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "787-2",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "hemoglobina corpuscular media eritrocitaria:masa entítica:punto en el tiempo:eritrocitos:cuantitativo:recuento automático",
+      "value": "29,2",
+      "unit": "pg",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "785-6",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "Concentración media de hemoglobina corpuscular en eritrocitos:Concentración de masa:Punto temporal:Eritrocitos:Cuantitativo:Recuento automatizado",
+      "value": "35,9",
+      "unit": "g/dL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "786-4",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "Ancho de distribución de eritrocitos:Proporción:Punto temporal:Eritrocitos:Cuantitativo:Recuento automatizado",
+      "value": "12,2",
+      "unit": "%",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "788-0",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "Platelets [#/volume] in Blood by Automated count",
+      "value": "299,2",
+      "unit": "10*3/uL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "777-3",
+      "panel": "Hemograma Completo"
+    },
+    {
+      "test_name": "Glucose [Mass/Vol]",
+      "value": "98,6",
+      "unit": "mg/dL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "2345-7",
+      "panel": "Bioquimica Basica"
+    },
+    {
+      "test_name": "Creatinina:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:",
+      "value": "0,940",
+      "unit": "mg/dL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "2160-0",
+      "panel": "Bioquimica Basica"
+    },
+    {
+      "test_name": "Urea nitrogen [Mass/Vol]",
+      "value": "16,2",
+      "unit": "mg/dL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "3094-0",
+      "panel": "Bioquimica Basica"
+    },
+    {
+      "test_name": "Albúmina:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:",
+      "value": "4,25",
+      "unit": "g/dL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "1751-7",
+      "panel": "Bioquimica Basica"
+    },
+    {
+      "test_name": "Proteína:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:",
+      "value": "7,84",
+      "unit": "g/dL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "2885-2",
+      "panel": "Bioquimica Basica"
+    },
+    {
+      "test_name": "Potasio:Concentración de sustancias:Punto temporal:Suero o Plasma:Cuantitativo:",
+      "value": "4,26",
+      "unit": "mmol/L",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "2823-3",
+      "panel": "Bioquimica Basica"
+    },
+    {
+      "test_name": "Sodium [Moles/volume] in Serum or Plasma",
+      "value": "140,6",
+      "unit": "mmol/L",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "2951-2",
+      "panel": "Bioquimica Basica"
+    },
+    {
+      "test_name": "Calcium [Mass/Vol]",
+      "value": "9,37",
+      "unit": "mg/dL",
+      "reference_range": "",
+      "flag": null,
+      "loinc": "17861-6",
+      "panel": "Bioquimica Basica"
+    }
+  ]
+}

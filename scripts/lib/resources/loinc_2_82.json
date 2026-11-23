@@ -1,0 +1,696 @@
+{
+  "source_sha256": {
+    "AccessoryFiles/LinguisticVariants/esAR7LinguisticVariant.csv": "293a34d8078eff5686c045cc1c46fddc68fbb9cb8e1d794fbe9d5366267c6355",
+    "AccessoryFiles/LinguisticVariants/esES12LinguisticVariant.csv": "b54d815e80fa6ffca5f47a336ddf0a62fd581dce3a82c3a6fdf6f7d2abc5b46c",
+    "AccessoryFiles/LinguisticVariants/esMX28LinguisticVariant.csv": "fc42ac2b1492a2f96d5a3c478487510cc836fd48244cc8beae9ab227a376ee42",
+    "LoincTable/Loinc.csv": "6187d5b2fcd89398fba45073f706fd15e24d0563afb750d9fef533881442fe1d"
+  },
+  "terms": {
+    "1742-6": {
+      "names": {
+        "argentina": [
+          "alanina aminotransferasa:concentración catalítica:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "ALT SerPl-cCnc",
+          "Alanine aminotransferase [Enzymatic activity/volume] in Serum or Plasma",
+          "ALT [Catalytic activity/Vol]"
+        ],
+        "mexico": [
+          "Alanina aminotransferasa:Concentración catalítica:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Alanina aminotransferasa:Concentración Catalítica:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "CCnc",
+      "scale": "Qn",
+      "units": [
+        "U/L"
+      ]
+    },
+    "1751-7": {
+      "names": {
+        "argentina": [
+          "albúmina:concentración de masa:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Albumin SerPl-mCnc",
+          "Albumin [Mass/volume] in Serum or Plasma",
+          "Albumin [Mass/Vol]"
+        ],
+        "mexico": [
+          "Albúmina:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Albúmina:Concentración de masa:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "g/dL"
+      ]
+    },
+    "17861-6": {
+      "names": {
+        "argentina": [
+          "calcio:concentración de masa:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Calcium SerPl-mCnc",
+          "Calcium [Mass/volume] in Serum or Plasma",
+          "Calcium [Mass/Vol]"
+        ],
+        "mexico": [
+          "Calcio:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Calcio:Concentración de masa:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "1920-8": {
+      "names": {
+        "argentina": [
+          "aspartato aminotransferasa:concentración catalítica:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "AST SerPl-cCnc",
+          "Aspartate aminotransferase [Enzymatic activity/volume] in Serum or Plasma",
+          "AST [Catalytic activity/Vol]"
+        ],
+        "mexico": [
+          "Aspartato aminotransferasa:Concentración catalítica:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Aspartato amino transferasa:Concentración Catalítica:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "CCnc",
+      "scale": "Qn",
+      "units": [
+        "U/L"
+      ]
+    },
+    "1975-2": {
+      "names": {
+        "argentina": [
+          "bilirrubina:concentración de masa:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Bilirub SerPl-mCnc",
+          "Bilirubin.total [Mass/volume] in Serum or Plasma",
+          "Bilirubin [Mass/Vol]"
+        ],
+        "mexico": [
+          "Bilirrubina:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Bilirrubina:Concentración de masa:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "2028-9": {
+      "names": {
+        "argentina": [
+          "dióxido de carbono:concentración de sustancia:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "CO2 SerPl-sCnc",
+          "Carbon dioxide, total [Moles/volume] in Serum or Plasma",
+          "CO2 [Moles/Vol]"
+        ],
+        "mexico": [
+          "Dióxido de carbono:Concentración de sustancias:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Dioxido de carbono:Concentración de sustancia:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "SCnc",
+      "scale": "Qn",
+      "units": [
+        "mmol/L"
+      ]
+    },
+    "2075-0": {
+      "names": {
+        "argentina": [
+          "cloruro:concentración de sustancia:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Chloride SerPl-sCnc",
+          "Chloride [Moles/volume] in Serum or Plasma",
+          "Chloride [Moles/Vol]"
+        ],
+        "mexico": [
+          "Cloruro:Concentración de sustancias:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Cloro:Concentración de sustancia:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "SCnc",
+      "scale": "Qn",
+      "units": [
+        "mmol/L"
+      ]
+    },
+    "2085-9": {
+      "names": {
+        "en": [
+          "HDLc SerPl-mCnc",
+          "Cholesterol in HDL [Mass/volume] in Serum or Plasma",
+          "Cholesterol in HDL [Mass/Vol]"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "2089-1": {
+      "names": {
+        "en": [
+          "LDLc SerPl-mCnc",
+          "Cholesterol in LDL [Mass/volume] in Serum or Plasma",
+          "Cholesterol in LDL [Mass/Vol]"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "2093-3": {
+      "names": {
+        "argentina": [
+          "colesterol:concentración de masa:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Cholest SerPl-mCnc",
+          "Cholesterol [Mass/volume] in Serum or Plasma",
+          "Cholesterol [Mass/Vol]"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "2160-0": {
+      "names": {
+        "argentina": [
+          "creatinina:concentración de masa:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Creat SerPl-mCnc",
+          "Creatinine [Mass/volume] in Serum or Plasma",
+          "Creatinine [Mass/Vol]"
+        ],
+        "mexico": [
+          "Creatinina:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Creatinina:Concentración de masa:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "2345-7": {
+      "names": {
+        "argentina": [
+          "glucosa:concentración de masa:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Glucose SerPl-mCnc",
+          "Glucose [Mass/volume] in Serum or Plasma",
+          "Glucose [Mass/Vol]"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "2571-8": {
+      "names": {
+        "argentina": [
+          "triglicérido:concentración de masa:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Trigl SerPl-mCnc",
+          "Triglyceride [Mass/volume] in Serum or Plasma",
+          "Triglyceride [Mass/Vol]"
+        ],
+        "mexico": [
+          "Triglicéridos:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Triglicéridos:Concentración de masa:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "2823-3": {
+      "names": {
+        "argentina": [
+          "potasio:concentración de sustancia:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Potassium SerPl-sCnc",
+          "Potassium [Moles/volume] in Serum or Plasma",
+          "Potassium [Moles/Vol]"
+        ],
+        "mexico": [
+          "Potasio:Concentración de sustancias:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Potasio:Concentración de sustancia:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "SCnc",
+      "scale": "Qn",
+      "units": [
+        "mmol/L"
+      ]
+    },
+    "2885-2": {
+      "names": {
+        "argentina": [
+          "proteína:concentración de masa:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Prot SerPl-mCnc",
+          "Protein [Mass/volume] in Serum or Plasma",
+          "Protein [Mass/Vol]"
+        ],
+        "mexico": [
+          "Proteína: Suero o Plasma : Punto temporal: Concentración de masa: Cuantitativo:",
+          "Proteína:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Proteínas:Concentración de masa:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "g/dL"
+      ]
+    },
+    "2951-2": {
+      "names": {
+        "argentina": [
+          "sodio:concentración de sustancia:punto en el tiempo:suero/plasma:cuantitativo:"
+        ],
+        "en": [
+          "Sodium SerPl-sCnc",
+          "Sodium [Moles/volume] in Serum or Plasma",
+          "Sodium [Moles/Vol]"
+        ],
+        "mexico": [
+          "Sodio:Concentración de sustancias:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Sodio:Concentración de sustancia:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "SCnc",
+      "scale": "Qn",
+      "units": [
+        "mmol/L"
+      ]
+    },
+    "3094-0": {
+      "names": {
+        "en": [
+          "BUN SerPl-mCnc",
+          "Urea nitrogen [Mass/volume] in Serum or Plasma",
+          "Urea nitrogen [Mass/Vol]"
+        ],
+        "mexico": [
+          "Nitrógeno de urea:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:"
+        ],
+        "spain": [
+          "Nitrógeno ureico:Concentración de masa:Punto temporal:Suero o Plasma:Qn:"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "mg/dL"
+      ]
+    },
+    "4544-3": {
+      "names": {
+        "argentina": [
+          "hematócrito:fracción de volumen:punto en el tiempo:sangre:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "Hct VFr Bld Auto",
+          "Hematocrit [Volume Fraction] of Blood by Automated count",
+          "Hematocrit Auto (Bld) [Volume fraction]"
+        ],
+        "mexico": [
+          "Hematocrito:Fracción de volumen:Punto temporal:Sangre:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Eritrocito/Sangre:Fracción de volumen:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "VFr",
+      "scale": "Qn",
+      "units": [
+        "%"
+      ]
+    },
+    "5905-5": {
+      "names": {
+        "argentina": [
+          "monocitos/100 leucocitos:fracción de un número:punto en el tiempo:sangre:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "Monocytes NFr Bld Auto",
+          "Monocytes/Leukocytes in Blood by Automated count",
+          "Monocytes/Leukocytes Auto (Bld)"
+        ],
+        "mexico": [
+          "Monocitos / 100 leucocitos:Fracción numérica:Punto temporal:Sangre:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Monocitos/Leucocitos:Fracción numérica:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "NFr",
+      "scale": "Qn",
+      "units": [
+        "%"
+      ]
+    },
+    "6690-2": {
+      "names": {
+        "argentina": [
+          "leucocitos:concentración de número:punto en el tiempo:sangre:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "WBC # Bld Auto",
+          "Leukocytes [#/volume] in Blood by Automated count",
+          "WBC Auto (Bld) [#/Vol]"
+        ],
+        "mexico": [
+          "Leucocitos:Concentración numérica:Punto temporal:Sangre:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Leucocitos:Concentración de número:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "NCnc",
+      "scale": "Qn",
+      "units": [
+        "10*3/uL"
+      ]
+    },
+    "6768-6": {
+      "names": {
+        "en": [
+          "ALP SerPl-cCnc",
+          "Alkaline phosphatase [Enzymatic activity/volume] in Serum or Plasma",
+          "ALP [Catalytic activity/Vol]"
+        ]
+      },
+      "property": "CCnc",
+      "scale": "Qn",
+      "units": [
+        "U/L"
+      ]
+    },
+    "706-2": {
+      "names": {
+        "argentina": [
+          "basófilos/100 leucocitos:fracción de un número:punto en el tiempo:sangre:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "Basophils NFr Bld Auto",
+          "Basophils/Leukocytes in Blood by Automated count",
+          "Basophils/Leukocytes Auto (Bld)"
+        ],
+        "mexico": [
+          "Basófilos / 100 leucocitos:Fracción numérica:Punto temporal:Sangre:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Basófilos/Leucocitos:Fracción numérica:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "NFr",
+      "scale": "Qn",
+      "units": [
+        "%"
+      ]
+    },
+    "713-8": {
+      "names": {
+        "argentina": [
+          "eosinófilos/100 leucocitos:fracción de un número:punto en el tiempo:sangre:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "Eosinophil NFr Bld Auto",
+          "Eosinophils/Leukocytes in Blood by Automated count",
+          "Eosinophils/Leukocytes Auto (Bld)"
+        ],
+        "mexico": [
+          "Eosinófilos / 100 leucocitos:Fracción numérica:Punto temporal:Sangre:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Eosinófilos/Leucocitos:Fracción numérica:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "NFr",
+      "scale": "Qn",
+      "units": [
+        "%"
+      ]
+    },
+    "718-7": {
+      "names": {
+        "argentina": [
+          "hemoglobina:concentración de masa:punto en el tiempo:sangre:cuantitativo:"
+        ],
+        "en": [
+          "Hgb Bld-mCnc",
+          "Hemoglobin [Mass/volume] in Blood",
+          "Hemoglobin (Bld) [Mass/Vol]"
+        ],
+        "mexico": [
+          "Hemoglobina:Concentración de masa:Punto temporal:Sangre:Cuantitativo:"
+        ],
+        "spain": [
+          "Hemoglobina:Concentración de masa:Punto temporal:Sangre:Qn:"
+        ]
+      },
+      "property": "MCnc",
+      "scale": "Qn",
+      "units": [
+        "g/dL"
+      ]
+    },
+    "736-9": {
+      "names": {
+        "argentina": [
+          "linfocitos/100 leucocitos:fracción de un número:punto en el tiempo:sangre:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "Lymphocytes NFr Bld Auto",
+          "Lymphocytes/Leukocytes in Blood by Automated count",
+          "Lymphocytes/Leukocytes Auto (Bld)"
+        ],
+        "mexico": [
+          "Linfocitos / 100 leucocitos:Fracción numérica:Punto temporal:Sangre:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Linfocitos/Leucocitos:Fracción numérica:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "NFr",
+      "scale": "Qn",
+      "units": [
+        "%"
+      ]
+    },
+    "770-8": {
+      "names": {
+        "argentina": [
+          "neutrófilos/100 leucocitos:fracción de un número:punto en el tiempo:sangre:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "Neutrophils NFr Bld Auto",
+          "Neutrophils/Leukocytes in Blood by Automated count",
+          "Neutrophils/Leukocytes Auto (Bld)"
+        ],
+        "mexico": [
+          "Neutrófilos / 100 leucocitos:Fracción numérica:Punto temporal:Sangre:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Neutrófilos/Leucocitos:Fracción numérica:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "NFr",
+      "scale": "Qn",
+      "units": [
+        "%"
+      ]
+    },
+    "777-3": {
+      "names": {
+        "en": [
+          "Platelets [#/volume] in Blood by Automated count",
+          "Platelets Auto (Bld) [#/Vol]"
+        ]
+      },
+      "property": "NCnc",
+      "scale": "Qn",
+      "units": [
+        "10*3/uL"
+      ]
+    },
+    "785-6": {
+      "names": {
+        "argentina": [
+          "hemoglobina corpuscular media eritrocitaria:masa entítica:punto en el tiempo:eritrocitos:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "MCH RBC Qn Auto",
+          "MCH [Entitic mass] by Automated count",
+          "MCH Auto (RBC) [Entitic mass]"
+        ],
+        "mexico": [
+          "Hemoglobina corpuscular media de eritrocitos:Masa entitica:Punto temporal:Eritrocitos:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Hemoglobina:Masa entítica:Punto temporal:Glóbulos rojos:Qn:Contaje automático"
+        ]
+      },
+      "property": "EntMass",
+      "scale": "Qn",
+      "units": [
+        "pg"
+      ]
+    },
+    "786-4": {
+      "names": {
+        "argentina": [
+          "concentración de hemoglobina corpuscular media eritrocitaria:concentración de masa:punto en el tiempo:eritrocitos:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "MCHC RBC Auto-EntMCnc",
+          "MCHC [Entitic Mass/volume] in Red Blood Cells by Automated count",
+          "MCHC Auto (RBC) [Entitic Mass/Vol]"
+        ],
+        "mexico": [
+          "Concentración media de hemoglobina corpuscular en eritrocitos:Concentración de masa:Punto temporal:Eritrocitos:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Hemoglobina:Masa/volumen entítico:Punto temporal:Glóbulos rojos:Qn:Contaje automático"
+        ]
+      },
+      "property": "EntMCnc",
+      "scale": "Qn",
+      "units": [
+        "g/dL"
+      ]
+    },
+    "787-2": {
+      "names": {
+        "argentina": [
+          "volumen corpuscular medio:volumen entítico:punto en el tiempo:eritrocitos:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "MCV RBC Auto",
+          "MCV [Entitic mean volume] in Red Blood Cells by Automated count",
+          "MCV Auto (RBC) [Entitic mean vol]"
+        ],
+        "mexico": [
+          "Volumen corpuscular medio de eritrocitos:Volumen entítico:Punto temporal:Eritrocitos:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Observación:Volumen medio entítico:Punto temporal:Glóbulos rojos:Qn:Contaje automático"
+        ]
+      },
+      "property": "EntMeanVol",
+      "scale": "Qn",
+      "units": [
+        "fL"
+      ]
+    },
+    "788-0": {
+      "names": {
+        "argentina": [
+          "ancho de distribución eritrocitaria:relación:punto en el tiempo:eritrocitos:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "Erythrocyte DistWidth Bld Auto",
+          "Erythrocyte [DistWidth] in Blood by Automated count",
+          "Erythrocyte Auto (Bld) [DistWidth]"
+        ],
+        "mexico": [
+          "Ancho de distribución de eritrocitos:Proporción:Punto temporal:Eritrocitos:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Eritrocito:Ancho de distribución:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "DistWidth",
+      "scale": "Qn",
+      "units": [
+        "%"
+      ]
+    },
+    "789-8": {
+      "names": {
+        "argentina": [
+          "eritrocitos:concentración de número:punto en el tiempo:sangre:cuantitativo:recuento automático"
+        ],
+        "en": [
+          "RBC # Bld Auto",
+          "Erythrocytes [#/volume] in Blood by Automated count",
+          "RBC Auto (Bld) [#/Vol]"
+        ],
+        "mexico": [
+          "Eritrocitos:Concentración numérica:Punto temporal:Sangre:Cuantitativo:Recuento automatizado"
+        ],
+        "spain": [
+          "Hematíes:Concentración de número:Punto temporal:Sangre:Qn:Contaje automático"
+        ]
+      },
+      "property": "NCnc",
+      "scale": "Qn",
+      "units": [
+        "10*6/uL"
+      ]
+    }
+  },
+  "version": "2.82"
+}

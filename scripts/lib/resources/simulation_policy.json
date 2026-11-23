@@ -1,0 +1,7 @@
+{
+  "loinc_version": "2.83",
+  "positive": "LA6576-8",
+  "negative": "LA6577-6",
+  "binary_answer_lists": {},
+  "excluded_display_names": {}
+}

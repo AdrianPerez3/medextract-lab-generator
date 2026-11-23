@@ -1,0 +1,12 @@
+.venv/
+.env
+.env.*
+.ruff_cache/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.DS_Store
+/demo-run/
+/analitiques/
+/dist/
+/medextract-lab-generator-source.zip
