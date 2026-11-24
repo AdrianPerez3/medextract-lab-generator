@@ -6,7 +6,9 @@ Generate a vector PDF and one JPEG per page, then compare an extractor’s outpu
 
 ## Download 1,000 annotated lab reports
 
-The published v0.1.0 starter uses catalog-style test names. It contains 1,000 reports, 1,417 clean page images and 18,329 observations with row and cell coordinates. All pages of a report stay together in the training, validation or test split. You can stream a split from Hugging Face or download the PDFs, images and labels as Parquet files. [MedExtract Synthetic Lab Reports on Hugging Face](https://huggingface.co/datasets/AdrianPerez3/medextract-synthetic-lab-reports-starter)
+Starter v0.2.0 contains 1,000 synthetic reports, 1,015 clean page images and 18,329 observations with row and cell coordinates. The pages use concise Spanish test names and accented headings. Each report stays in its original training, validation or test split. Stream a split from Hugging Face or download the PDFs, images and labels as Parquet files. [MedExtract Synthetic Lab Reports on Hugging Face](https://huggingface.co/datasets/AdrianPerez3/medextract-synthetic-lab-reports-starter)
+
+For comparisons with earlier OCR results, v0.1.0 contains the same observations with catalog-style names across 1,417 pages. Read each version’s images and coordinates together. [Original starter revision](https://huggingface.co/datasets/AdrianPerez3/medextract-synthetic-lab-reports-starter/tree/2880762ee47ef0e9fa26ae9c27a914c6f7cfd0c9)
 
 In the starter’s worked example, glucose reads `163,6` and creatinine reads `1,49`. Swapping the value locations along with their text leaves both numbers transcribed correctly. The scorer then credits zero correct test-to-value associations. [Run the row-association scoring example](https://huggingface.co/datasets/AdrianPerez3/medextract-synthetic-lab-reports-starter/blob/main/examples/README.md)
 

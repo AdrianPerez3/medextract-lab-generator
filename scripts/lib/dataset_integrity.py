@@ -10,6 +10,8 @@ from decimal import Decimal
 from itertools import zip_longest
 from pathlib import Path
 
+from .template_engine import printed_panel_name
+
 
 def _reject_constant(value: str):
     raise ValueError(f"Invalid JSON number: {value}")
@@ -64,7 +66,7 @@ def check_training_record(kind, row, images, truth):
 
 
 def check_projection(visible, normalized, columns, sections, european, reference_policy="simulated", simulation_revision=1,
-                     *, print_names=None):
+                     *, print_names=None, template_text_revision=1):
     from .value_generator import ValueGenerator
     from .correlation_engine import _AUTO_DIFFERENTIAL
     differential = {}
@@ -123,7 +125,7 @@ def check_projection(visible, normalized, columns, sections, european, reference
             if original["flag"] != flag:
                 raise ValueError("Simulated titre flag disagrees with the printed reference")
         expected = (value, reference if columns >= 4 else "", original["flag"] if columns >= 5 else None,
-                    " ".join(original["panel"].split()) if sections else "")
+                    printed_panel_name(original["panel"], template_text_revision) if sections else "")
         if (row["value"], row["reference_range"], row["flag"], row["panel"]) != expected:
             raise ValueError(f"Visible result differs from the normalized value or layout for {row['loinc']}")
     total = sum(differential.values())
@@ -309,6 +311,9 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
     name_style = meta.get("name_style", "catalog")
     if name_style not in ("catalog", "routine-es") or (revision < 4 and name_style != "catalog"):
         raise ValueError("Invalid test name style for simulation revision")
+    text_revision = meta.get("template_text_revision", 1)
+    if type(text_revision) is not int or text_revision not in (1, 2) or (text_revision == 2 and name_style != "routine-es"):
+        raise ValueError("Invalid template text revision for test name style")
     extended = meta.get("numeric_vocabulary") != "guarded"
     print_names = {}
     try:
@@ -362,6 +367,9 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
     from generate_complete_synthetic import GENERATOR_SOURCES
     if set(sources) != set(GENERATOR_SOURCES) or any(not re.fullmatch("[0-9a-f]{64}", digest) for digest in sources.values()):
         raise ValueError("Invalid generator source inventory")
+    if (name_style == "routine-es" and text_revision == 1
+            and file_sha256(GENERATOR_SOURCES["generate_complete_synthetic.py"]) == sources["generate_complete_synthetic.py"]):
+        raise ValueError("Current routine-es generator requires template text revision 2")
     current_value_source = GENERATOR_SOURCES["scripts/lib/value_generator.py"]
     if (modern and revision < 4 and
             file_sha256(current_value_source) == sources["scripts/lib/value_generator.py"]):
@@ -490,7 +498,8 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                 targets[field] = target
             labels = targets["ground_truth"]["results"]
             check_projection(labels, targets["normalized_ground_truth"]["results"], rec["column_count"], rec["show_sections"],
-                             meta["european"], reference_policy, revision, print_names=print_names)
+                             meta["european"], reference_policy, revision, print_names=print_names,
+                             template_text_revision=text_revision)
             receipt = _checked_json(root, coordinate_path, rec["sha256"]) if coordinates else None
             if pdf:
                 with closing(pypdfium2.PdfDocument(root / pdf)) as doc:

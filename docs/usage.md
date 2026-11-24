@@ -13,7 +13,7 @@ The report headings use simulation tokens for people. The patient label begins w
 
 ## Choose the printed test names
 
-The default `--name-style routine-es` uses a short Spanish label for each of the 32 demo codes. For example, the report distinguishes `Hematíes`, `Hemoglobina corpuscular media (HCM)` and `Hemoglobina`. Use `ground_truth/` to score the literal text on the page, and join to `normalized_ground_truth/` by report ID and LOINC to inspect the corresponding catalog term.
+The default `--name-style routine-es` uses a short Spanish label for each of the 32 demo codes. Printed section headings retain Spanish accents, including `Bioquímica básica`. The visible annotations carry the section title as printed when the layout includes headings. For example, the report distinguishes `Hematíes`, `Hemoglobina corpuscular media (HCM)` and `Hemoglobina`. Use `ground_truth/` to score the literal text on the page, and join to `normalized_ground_truth/` by report ID and LOINC to inspect the corresponding catalog term.
 
 Use `--name-style catalog` to exercise terminology extraction with the earlier mix of code-bound Spanish and English names. This is the naming style used in starter v0.1.0. In a build with a larger pinned LOINC catalog, codes outside the 32-name lookup retain their catalog labels. A shorter printed name can change wrapping, pagination and cell coordinates. Always take the sidecar and image from the same run.
 

@@ -294,6 +294,21 @@ def test_current_binary_reference_and_flag_are_reconciled():
         check_projection([row], [row], 5, False, True, "simulated", 3)
 
 
+def test_panel_spelling_is_checked_against_the_run_revision_and_section_visibility():
+    from scripts.lib.dataset_integrity import check_projection
+
+    normalized = {"loinc": "demo", "test_name": "Prueba", "unit": "", "value": "Resultado",
+                  "reference_range": "", "flag": None, "panel": "Otros Analisis"}
+    accented = {**normalized, "panel": "Otros análisis"}
+    for revision, expected, wrong in [(2, accented, normalized), (1, normalized, accented)]:
+        check_projection([expected], [normalized], 3, True, True, template_text_revision=revision)
+        with pytest.raises(ValueError, match="Visible result differs"):
+            check_projection([wrong], [normalized], 3, True, True, template_text_revision=revision)
+        check_projection([{**expected, "panel": ""}], [normalized], 3, False, True, template_text_revision=revision)
+    custom = {**normalized, "panel": "Mi sección personalizada"}
+    check_projection([custom], [custom], 3, True, True, template_text_revision=2)
+
+
 @pytest.mark.parametrize(("field", "invalid"), [("seed", None), ("seed", True), ("seed", 2**53),
                                                 ("tier", 6), ("tier", False), ("result_count", True)])
 def test_current_manifest_scalar_types(tmp_path, clean, field, invalid):
@@ -454,8 +469,10 @@ def test_negative_coverage_has_a_cli_error_message(clean, capsys):
 
 
 @pytest.mark.parametrize("mutation,reason", [
-    ("remove-style", "Input hash inventory"),
+    ("remove-style", "Invalid template text revision"),
     ("unknown-style", "Invalid test name style"),
+    ("remove-text-revision", "Current routine-es generator requires"),
+    ("invalid-text-revision", "Invalid template text revision"),
     ("resource-hash", "input digest differs"),
     ("technical-print", "Name or unit"),
     ("wrong-catalog-name", "Name or unit"),
@@ -469,6 +486,10 @@ def test_name_style_binds_both_annotation_forms_and_alias_file(tmp_path, clean, 
         del settings["name_style"]
     elif mutation == "unknown-style":
         settings["name_style"] = "unknown"
+    elif mutation == "remove-text-revision":
+        del settings["template_text_revision"]
+    elif mutation == "invalid-text-revision":
+        settings["template_text_revision"] = True
     elif mutation == "resource-hash":
         settings["input_sha256"]["routine_es_names"] = "0" * 64
     else:

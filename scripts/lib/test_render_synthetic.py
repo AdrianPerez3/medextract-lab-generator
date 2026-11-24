@@ -42,6 +42,36 @@ def clinical_fixture():
     )
 
 
+@pytest.mark.parametrize("revision,age,age_text,page_text,panel_text,column_factory,column_title", [
+    (2, 1, "1 año", "Página", "Bioquímica básica", _cols_3, "Análisis"),
+    (2, 17, "17 años", "Página", "Bioquímica básica", _cols_6, "Método"),
+    (1, 17, "17 anos", "Pagina", "Bioquimica Basica", _cols_6, "Metodo"),
+])
+def test_template_spelling_survives_pagination(tmp_path, revision, age, age_text, page_text, panel_text,
+                                               column_factory, column_title):
+    from contextlib import closing
+
+    report = clinical_fixture()
+    report.patient_age = age
+    report.panels = [("Bioquimica Basica", report.panels[0][1] * 75)]
+    template = {"template_text_revision": revision, "columns": column_factory()}
+    pdf = tmp_path / "pages.pdf"
+    assert generator.render_simple_pdf(report, template, pdf) >= 2
+    with closing(pdfium.PdfDocument(pdf)) as doc:
+        for index in range(len(doc)):
+            with closing(doc[index]) as page, closing(page.get_textpage()) as textpage:
+                text = textpage.get_text_bounded()
+            assert f"{page_text} {index + 1}" in text
+            assert panel_text in text and column_title in text
+            if column_factory is _cols_6:
+                assert ("Alerta" if revision == 2 else "Flag") in text
+            if index == 0:
+                assert f"Edad: {age_text}" in text
+    assert {row["panel"] for row in generator.visible_ground_truth(report, template)["results"]} == {panel_text}
+    template["show_sections"] = False
+    assert {row["panel"] for row in generator.visible_ground_truth(report, template)["results"]} == {""}
+
+
 @pytest.mark.parametrize("columns", [_cols_3, _cols_4, _cols_5, _cols_6])
 def test_labels_match_visible_fields(tmp_path, columns):
     report = clinical_fixture()
@@ -182,6 +212,30 @@ def test_tight_six_column_headers_have_measurable_glyph_gaps(tmp_path):
             if previous_right is not None:
                 assert left - previous_right >= 3.75, (column["name"], left - previous_right)
             previous_right = max(box[2] for box in boxes)
+
+
+@pytest.mark.parametrize("extra_width,expected", [(-4, "Al."), (0, "Alerta"), (12, "Alerta")])
+def test_routine_alert_header_stays_on_one_line_inside_its_column(tmp_path, extra_width, expected):
+    from contextlib import closing
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    columns = _cols_6()
+    usable = A4[0] - 60 - 50
+    width = stringWidth("Alerta", "Courier-Bold", 6) + 4 + extra_width
+    columns[4]["width_pct"] = width / usable
+    left = 60 + usable * sum(col["width_pct"] for col in columns[:4])
+    config = {"template_text_revision": 2, "columns": columns,
+              "font_config": {"family": "Courier", "body_size": 10}}
+    pdf = tmp_path / "routine-alert.pdf"
+    generator.render_simple_pdf(clinical_fixture(), config, pdf)
+    with closing(pdfium.PdfDocument(pdf)) as doc, closing(doc[0]) as page, closing(page.get_textpage()) as text:
+        with closing(text.search("Prueba", match_case=True)) as search:
+            index, _ = search.get_next()
+        _, bottom, _, top = text.get_charbox(index)
+        # Include the next line under the header so a wrapped suffix fails.
+        label = text.get_text_bounded(left=left, right=left + width, bottom=bottom - 16, top=top + 2)
+        assert label.strip() == expected
 
 
 def test_color_raster_with_padding_keeps_bgr_channels(tmp_path):
