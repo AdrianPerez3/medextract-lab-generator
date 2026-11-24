@@ -29,6 +29,41 @@ python scripts/analyze_synthetic_dataset.py --dataset demo-run --rare-at-most 5 
 
 Open `coverage.html` in a browser. The tool also writes the analysis as JSON to stdout. It reads one visible label file per report, verifies its recorded checksum, and counts the rows assigned to each eligible LOINC. The chart shows missing and rare codes, how many result rows the ten most common codes account for, and how reports vary in pages, row counts, columns and capture tier. Page counts and tiers come from the manifest. Use the validator to check media integrity and source fingerprints.
 
+## Check which test a value belongs to
+
+Generate the 16-report quickstart with coordinates and validate the resulting files.
+
+```sh
+python generate_complete_synthetic.py --coordinates --count 16 --seed 42 --workers 2 --format both --tiers 1,0,0,0,0 --dpi 144 --output spatial-run
+python scripts/validate_synthetic_dataset.py --dataset spatial-run --expected-count 16 --verify-source
+```
+
+The manifest's `coordinates` entry points to a JSON file for that report. Each page has its own width, height and rows. Each row's zero-based `result_index` selects the corresponding entry in the **visible** label's `results` array. Its `loinc` identifies the test. The sidecar records the SHA-256 of that visible label, so predictions can be scored against the labels used for that rendering.
+
+Rows and cells use rectangles `[left, top, right, bottom]` in PDF points, measured from the top-left corner of the page. Pages start at 1. Each field has a rectangle covering its allocated table cell, including whitespace and wrapped lines. Blank visible columns also have rectangles. When extracting from a clean JPEG, use the actual pixel dimensions in the page's `image` entry. To convert a PDF point to pixels, multiply x by `image.width / page.width` and y by `image.height / page.height`. The two ratios account for raster dimension rounding.
+
+For vector-only extraction, use `--format pdf --coordinates`. Image coordinates currently support clean tier 0. The CLI requires `--tiers 1,0,0,0,0` for image runs with coordinates because other tiers can rotate or warp the printed cells.
+
+To score an extraction, supply one point inside the printed test name and one inside the value paired with it. Use the center of each predicted word or field box. For example, save these two predictions from the first quickstart PDF as `predictions.json`.
+
+```json
+{
+  "report_id": "RPT_000000",
+  "predictions": [
+    {"page": 1, "test_point": [78, 148], "value_point": [294, 148], "value_text": "6,79"},
+    {"page": 1, "test_point": [76, 171], "value_point": [294, 171], "value_text": "4,87"}
+  ]
+}
+```
+
+```sh
+python scripts/score_row_associations.py --coordinates spatial-run/coordinates/RPT_000000.json --ground-truth spatial-run/ground_truth/RPT_000000.json --predictions predictions.json
+```
+
+Both predictions pair the correct cells and match the printed values. The scorer credits two of 17 expected rows. If you exchange the two value points together with their text, both values still transcribe their selected cells correctly, but the scorer reports two wrong-row links and zero correct associations. For original clean JPEG pixel positions, add `--space image-pixels`.
+
+`association` measures correct test-to-value links. `association_and_exact_value` also requires a character-for-character match to the printed value. Precision divides distinct matched rows by all submitted predictions, and recall divides them by all expected rows. Duplicate submissions can earn a row credit only once. The score evaluates the supplied locations and value text. It does not run OCR or check the extracted test-name spelling.
+
 ## Inspect results and flags
 
 The ordinary command leaves reference intervals empty and flags null. For a fixture that exercises those fields, pass `--simulated-reference-ranges`. The page footer then identifies displayed intervals and flags as simulated. Values, intervals and patient profiles are software test fixtures. They have no clinical validation.
