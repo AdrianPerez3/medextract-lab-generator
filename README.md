@@ -2,6 +2,8 @@
 
 Generate fictional laboratory reports with Spanish headings and Spanish or English test names. The bundled demo covers 32 quantitative LOINC codes and produces a vector PDF, one JPEG per page and two sets of JSON labels. Use them to test OCR, table extraction and terminology matching without patient records.
 
+The downloadable starter contains 1,000 synthetic reports, 1,417 clean page images, and row and cell coordinates for all 18,329 observations. It includes report-level train, validation, and test splits and a worked example for scoring test-to-value associations. [Starter dataset on Hugging Face](https://huggingface.co/datasets/AdrianPerez3/medextract-synthetic-lab-reports-starter)
+
 **Sample report** · [PDF](examples/report.pdf) · [JPEG](examples/report.jpg) · [Printed rows with LOINC annotations](examples/visible.json) · [Normalized rows](examples/normalized.json)
 
 In the first row of the sample, the printed white blood cell count is `6,79` in `10*3/uL`. The normalized JSON stores the string `"6.79"`. Both targets identify the observation as LOINC `6690-2`, so you can score the transcription and the code assignment separately.
