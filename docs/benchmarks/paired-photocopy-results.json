@@ -1,0 +1,587 @@
+{
+  "report_pairs": 40,
+  "underlying_rows": 280,
+  "row_views": 560,
+  "seed": 2026112405,
+  "manifest_sha256": "32c2a4d2ea9abb9cd571cf97f0f965a6dc9c3442fc79977caa6ce122b15b4993",
+  "methods": {
+    "paddle-only": {
+      "views": {
+        "clean": {
+          "accepted_predictions": 276,
+          "review_proposals": 0,
+          "unassigned_review_proposals": 0,
+          "printed_rows": 280,
+          "states": {
+            "exact": 273,
+            "wrong": 3,
+            "review": 0,
+            "missing": 4,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 276
+          },
+          "wrong_text_classes": {
+            "other_numeric": 2,
+            "power_of_ten": 1
+          },
+          "power_of_ten_magnitude_rows": 1,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 0.0
+        },
+        "photocopy": {
+          "accepted_predictions": 275,
+          "review_proposals": 0,
+          "unassigned_review_proposals": 0,
+          "printed_rows": 280,
+          "states": {
+            "exact": 257,
+            "wrong": 18,
+            "review": 0,
+            "missing": 5,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 275
+          },
+          "wrong_text_classes": {
+            "other_numeric": 3,
+            "decimal_mark": 15
+          },
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 0.0
+        }
+      },
+      "transitions": {
+        "exact": {
+          "exact": 253,
+          "wrong": 18,
+          "review": 0,
+          "missing": 2,
+          "ambiguous": 0
+        },
+        "wrong": {
+          "exact": 3,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "review": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "missing": {
+          "exact": 1,
+          "wrong": 0,
+          "review": 0,
+          "missing": 3,
+          "ambiguous": 0
+        },
+        "ambiguous": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        }
+      }
+    },
+    "tesseract-only": {
+      "views": {
+        "clean": {
+          "accepted_predictions": 279,
+          "review_proposals": 0,
+          "unassigned_review_proposals": 0,
+          "printed_rows": 280,
+          "states": {
+            "exact": 263,
+            "wrong": 16,
+            "review": 0,
+            "missing": 1,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 279
+          },
+          "wrong_text_classes": {
+            "power_of_ten": 8,
+            "other_numeric": 7,
+            "decimal_mark": 1
+          },
+          "power_of_ten_magnitude_rows": 8,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 0.0
+        },
+        "photocopy": {
+          "accepted_predictions": 258,
+          "review_proposals": 0,
+          "unassigned_review_proposals": 0,
+          "printed_rows": 280,
+          "states": {
+            "exact": 213,
+            "wrong": 45,
+            "review": 0,
+            "missing": 22,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 258
+          },
+          "wrong_text_classes": {
+            "power_of_ten": 29,
+            "sign_and_power_of_ten": 2,
+            "other_numeric": 10,
+            "decimal_mark": 3,
+            "sign": 1
+          },
+          "power_of_ten_magnitude_rows": 31,
+          "opposite_sign_rows": 3,
+          "review_proposals_per_100_rows": 0.0
+        }
+      },
+      "transitions": {
+        "exact": {
+          "exact": 207,
+          "wrong": 36,
+          "review": 0,
+          "missing": 20,
+          "ambiguous": 0
+        },
+        "wrong": {
+          "exact": 6,
+          "wrong": 9,
+          "review": 0,
+          "missing": 1,
+          "ambiguous": 0
+        },
+        "review": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "missing": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 1,
+          "ambiguous": 0
+        },
+        "ambiguous": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        }
+      }
+    },
+    "combined": {
+      "views": {
+        "clean": {
+          "accepted_predictions": 269,
+          "review_proposals": 13,
+          "unassigned_review_proposals": 0,
+          "printed_rows": 280,
+          "states": {
+            "exact": 269,
+            "wrong": 0,
+            "review": 11,
+            "missing": 0,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 269
+          },
+          "wrong_text_classes": {},
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 4.642857142857143
+        },
+        "photocopy": {
+          "accepted_predictions": 229,
+          "review_proposals": 53,
+          "unassigned_review_proposals": 0,
+          "printed_rows": 280,
+          "states": {
+            "exact": 225,
+            "wrong": 4,
+            "review": 51,
+            "missing": 0,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 229
+          },
+          "wrong_text_classes": {
+            "decimal_mark": 4
+          },
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 18.928571428571427
+        }
+      },
+      "transitions": {
+        "exact": {
+          "exact": 220,
+          "wrong": 4,
+          "review": 45,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "wrong": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "review": {
+          "exact": 5,
+          "wrong": 0,
+          "review": 6,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "missing": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "ambiguous": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        }
+      }
+    },
+    "guard": {
+      "views": {
+        "clean": {
+          "accepted_predictions": 265,
+          "review_proposals": 17,
+          "unassigned_review_proposals": 0,
+          "baseline_exact_to_review_rows": 4,
+          "baseline_review_to_review_rows": 11,
+          "printed_rows": 280,
+          "states": {
+            "exact": 265,
+            "wrong": 0,
+            "review": 15,
+            "missing": 0,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 265
+          },
+          "wrong_text_classes": {},
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 6.071428571428571,
+          "baseline_wrong_classes_to_review": {},
+          "baseline_exact_to_review_rows_per_100": 1.4285714285714286,
+          "baseline_wrong_to_review_rows": 0,
+          "baseline_wrong_to_review_rows_per_100": 0.0,
+          "baseline_review_to_review_rows_per_100": 3.9285714285714284,
+          "baseline_missing_to_review_rows": 0,
+          "baseline_missing_to_review_rows_per_100": 0.0,
+          "baseline_ambiguous_to_review_rows": 0,
+          "baseline_ambiguous_to_review_rows_per_100": 0.0
+        },
+        "photocopy": {
+          "accepted_predictions": 204,
+          "review_proposals": 78,
+          "unassigned_review_proposals": 0,
+          "baseline_review_to_review_rows": 51,
+          "baseline_exact_to_review_rows": 21,
+          "baseline_wrong_to_review_rows": 4,
+          "printed_rows": 280,
+          "states": {
+            "exact": 204,
+            "wrong": 0,
+            "review": 76,
+            "missing": 0,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 204
+          },
+          "wrong_text_classes": {},
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 27.857142857142858,
+          "baseline_wrong_classes_to_review": {
+            "decimal_mark": 4
+          },
+          "baseline_exact_to_review_rows_per_100": 7.5,
+          "baseline_wrong_to_review_rows_per_100": 1.4285714285714286,
+          "baseline_review_to_review_rows_per_100": 18.214285714285715,
+          "baseline_missing_to_review_rows": 0,
+          "baseline_missing_to_review_rows_per_100": 0.0,
+          "baseline_ambiguous_to_review_rows": 0,
+          "baseline_ambiguous_to_review_rows_per_100": 0.0
+        }
+      },
+      "transitions": {
+        "exact": {
+          "exact": 197,
+          "wrong": 0,
+          "review": 68,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "wrong": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "review": {
+          "exact": 7,
+          "wrong": 0,
+          "review": 8,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "missing": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "ambiguous": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        }
+      }
+    },
+    "vl": {
+      "views": {
+        "clean": {
+          "accepted_predictions": 266,
+          "review_proposals": 16,
+          "unassigned_review_proposals": 0,
+          "baseline_review_to_review_rows": 11,
+          "baseline_exact_to_review_rows": 3,
+          "printed_rows": 280,
+          "states": {
+            "exact": 266,
+            "wrong": 0,
+            "review": 14,
+            "missing": 0,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 266
+          },
+          "wrong_text_classes": {},
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 5.714285714285714,
+          "baseline_wrong_classes_to_review": {},
+          "baseline_exact_to_review_rows_per_100": 1.0714285714285714,
+          "baseline_wrong_to_review_rows": 0,
+          "baseline_wrong_to_review_rows_per_100": 0.0,
+          "baseline_review_to_review_rows_per_100": 3.9285714285714284,
+          "baseline_missing_to_review_rows": 0,
+          "baseline_missing_to_review_rows_per_100": 0.0,
+          "baseline_ambiguous_to_review_rows": 0,
+          "baseline_ambiguous_to_review_rows_per_100": 0.0
+        },
+        "photocopy": {
+          "accepted_predictions": 223,
+          "review_proposals": 59,
+          "unassigned_review_proposals": 0,
+          "baseline_review_to_review_rows": 51,
+          "baseline_exact_to_review_rows": 5,
+          "baseline_wrong_to_review_rows": 1,
+          "printed_rows": 280,
+          "states": {
+            "exact": 220,
+            "wrong": 3,
+            "review": 57,
+            "missing": 0,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 223
+          },
+          "wrong_text_classes": {
+            "decimal_mark": 3
+          },
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 21.071428571428573,
+          "baseline_wrong_classes_to_review": {
+            "decimal_mark": 1
+          },
+          "baseline_exact_to_review_rows_per_100": 1.7857142857142858,
+          "baseline_wrong_to_review_rows_per_100": 0.35714285714285715,
+          "baseline_review_to_review_rows_per_100": 18.214285714285715,
+          "baseline_missing_to_review_rows": 0,
+          "baseline_missing_to_review_rows_per_100": 0.0,
+          "baseline_ambiguous_to_review_rows": 0,
+          "baseline_ambiguous_to_review_rows_per_100": 0.0
+        }
+      },
+      "transitions": {
+        "exact": {
+          "exact": 215,
+          "wrong": 2,
+          "review": 49,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "wrong": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "review": {
+          "exact": 5,
+          "wrong": 1,
+          "review": 8,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "missing": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "ambiguous": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        }
+      }
+    },
+    "both": {
+      "views": {
+        "clean": {
+          "accepted_predictions": 262,
+          "review_proposals": 20,
+          "unassigned_review_proposals": 0,
+          "baseline_exact_to_review_rows": 7,
+          "baseline_review_to_review_rows": 11,
+          "printed_rows": 280,
+          "states": {
+            "exact": 262,
+            "wrong": 0,
+            "review": 18,
+            "missing": 0,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 262
+          },
+          "wrong_text_classes": {},
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 7.142857142857143,
+          "baseline_wrong_classes_to_review": {},
+          "baseline_exact_to_review_rows_per_100": 2.5,
+          "baseline_wrong_to_review_rows": 0,
+          "baseline_wrong_to_review_rows_per_100": 0.0,
+          "baseline_review_to_review_rows_per_100": 3.9285714285714284,
+          "baseline_missing_to_review_rows": 0,
+          "baseline_missing_to_review_rows_per_100": 0.0,
+          "baseline_ambiguous_to_review_rows": 0,
+          "baseline_ambiguous_to_review_rows_per_100": 0.0
+        },
+        "photocopy": {
+          "accepted_predictions": 199,
+          "review_proposals": 83,
+          "unassigned_review_proposals": 0,
+          "baseline_review_to_review_rows": 51,
+          "baseline_exact_to_review_rows": 26,
+          "baseline_wrong_to_review_rows": 4,
+          "printed_rows": 280,
+          "states": {
+            "exact": 199,
+            "wrong": 0,
+            "review": 81,
+            "missing": 0,
+            "ambiguous": 0
+          },
+          "accepted_geometry": {
+            "same_row": 199
+          },
+          "wrong_text_classes": {},
+          "power_of_ten_magnitude_rows": 0,
+          "opposite_sign_rows": 0,
+          "review_proposals_per_100_rows": 29.642857142857142,
+          "baseline_wrong_classes_to_review": {
+            "decimal_mark": 4
+          },
+          "baseline_exact_to_review_rows_per_100": 9.285714285714286,
+          "baseline_wrong_to_review_rows_per_100": 1.4285714285714286,
+          "baseline_review_to_review_rows_per_100": 18.214285714285715,
+          "baseline_missing_to_review_rows": 0,
+          "baseline_missing_to_review_rows_per_100": 0.0,
+          "baseline_ambiguous_to_review_rows": 0,
+          "baseline_ambiguous_to_review_rows_per_100": 0.0
+        }
+      },
+      "transitions": {
+        "exact": {
+          "exact": 192,
+          "wrong": 0,
+          "review": 70,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "wrong": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "review": {
+          "exact": 7,
+          "wrong": 0,
+          "review": 11,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "missing": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        },
+        "ambiguous": {
+          "exact": 0,
+          "wrong": 0,
+          "review": 0,
+          "missing": 0,
+          "ambiguous": 0
+        }
+      }
+    }
+  }
+}
