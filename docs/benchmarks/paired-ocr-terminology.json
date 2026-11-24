@@ -1,0 +1,78 @@
+{
+  "loinc_version": "2.82",
+  "source": "LoincTable/Loinc.csv",
+  "source_sha256": "6187d5b2fcd89398fba45073f706fd15e24d0563afb750d9fef533881442fe1d",
+  "license": "https://loinc.org/license/",
+  "terms": [
+    {
+      "LOINC_NUM": "1751-7",
+      "LONG_COMMON_NAME": "Albumin [Mass/volume] in Serum or Plasma",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "g/dL",
+      "local_test_name_es": "Albúmina sérica"
+    },
+    {
+      "LOINC_NUM": "1925-7",
+      "LONG_COMMON_NAME": "Base excess in Arterial blood by calculation",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "mmol/L",
+      "local_test_name_es": "Exceso de base arterial calculado"
+    },
+    {
+      "LOINC_NUM": "2160-0",
+      "LONG_COMMON_NAME": "Creatinine [Mass/volume] in Serum or Plasma",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "mg/dL",
+      "local_test_name_es": "Creatinina sérica"
+    },
+    {
+      "LOINC_NUM": "2345-7",
+      "LONG_COMMON_NAME": "Glucose [Mass/volume] in Serum or Plasma",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "mg/dL",
+      "local_test_name_es": "Glucosa sérica"
+    },
+    {
+      "LOINC_NUM": "2711-0",
+      "LONG_COMMON_NAME": "Oxygen saturation in Venous blood",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "%",
+      "local_test_name_es": "Saturación venosa de oxígeno"
+    },
+    {
+      "LOINC_NUM": "2823-3",
+      "LONG_COMMON_NAME": "Potassium [Moles/volume] in Serum or Plasma",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "mmol/L",
+      "local_test_name_es": "Potasio sérico"
+    },
+    {
+      "LOINC_NUM": "2951-2",
+      "LONG_COMMON_NAME": "Sodium [Moles/volume] in Serum or Plasma",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "mmol/L",
+      "local_test_name_es": "Sodio sérico"
+    },
+    {
+      "LOINC_NUM": "3094-0",
+      "LONG_COMMON_NAME": "Urea nitrogen [Mass/volume] in Serum or Plasma",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "mg/dL",
+      "local_test_name_es": "Nitrógeno ureico sérico"
+    },
+    {
+      "LOINC_NUM": "4544-3",
+      "LONG_COMMON_NAME": "Hematocrit [Volume Fraction] of Blood by Automated count",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "%",
+      "local_test_name_es": "Hematocrito automatizado"
+    },
+    {
+      "LOINC_NUM": "718-7",
+      "LONG_COMMON_NAME": "Hemoglobin [Mass/volume] in Blood",
+      "STATUS": "ACTIVE",
+      "EXAMPLE_UCUM_UNITS": "g/dL",
+      "local_test_name_es": "Hemoglobina en sangre"
+    }
+  ]
+}

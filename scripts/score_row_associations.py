@@ -136,6 +136,29 @@ def _locate(point, page, column):
     return None, True
 
 
+def locate_prediction(pages, item):
+    """Return each anchor's result index and a geometry outcome for one prediction."""
+    _object(item, "prediction")
+    number = _integer(item.get("page"), "prediction page", 1)
+    name = _numbers(item.get("test_point"), "test_point", 2)
+    value = _numbers(item.get("value_point"), "value_point", 2)
+    if not isinstance(item.get("value_text"), str):
+        raise ValueError("value_text must be a string")
+    if number > len(pages):
+        return None, None, "unknown_page"
+    test_row, name_in_page = _locate(name, pages[number - 1], 1)
+    value_row, value_in_page = _locate(value, pages[number - 1], 2)
+    if not (name_in_page and value_in_page):
+        location = "outside_page"
+    elif test_row is None or value_row is None:
+        location = "outside_target_cell"
+    elif test_row != value_row:
+        location = "different_row"
+    else:
+        location = "same_row"
+    return test_row, value_row, location
+
+
 def _metrics(matched, total, submitted):
     count = len(matched)
     return {
@@ -172,33 +195,17 @@ def score(coordinates, visible_bytes, predictions, space="pdf-points"):
     exact = set()
     text_at_value = text_for_test = 0
     for item in items:
-        _object(item, "prediction")
-        number = _integer(item.get("page"), "prediction page", 1)
-        name_point = _numbers(item.get("test_point"), "test_point", 2)
-        value_point = _numbers(item.get("value_point"), "value_point", 2)
-        text = item.get("value_text")
-        if not isinstance(text, str):
-            raise ValueError("value_text must be a string")
-        if number > len(pages):
-            geometry["unknown_page"] += 1
-            continue
-        page = pages[number - 1]
-        test_row, name_in_page = _locate(name_point, page, 1)
-        value_row, value_in_page = _locate(value_point, page, 2)
+        test_row, value_row, location = locate_prediction(pages, item)
+        text = item["value_text"]
+        geometry[location] += 1
         if test_row is not None:
             anchors[test_row] += 1
             text_for_test += values[test_row] == text
         if value_row is not None:
             text_at_value += values[value_row] == text
-        if not (name_in_page and value_in_page):
-            geometry["outside_page"] += 1
-        elif test_row is None or value_row is None:
-            geometry["outside_target_cell"] += 1
-        elif test_row != value_row:
-            geometry["different_row"] += 1
+        if location == "different_row":
             offsets[value_row - test_row] += 1
-        else:
-            geometry["same_row"] += 1
+        elif location == "same_row":
             associated.add(test_row)
             if values[test_row] == text:
                 exact.add(test_row)
