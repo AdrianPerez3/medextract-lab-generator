@@ -63,20 +63,26 @@ def check_training_record(kind, row, images, truth):
             raise ValueError("DPO needs a distinct, structured negative example")
 
 
-def check_projection(visible, normalized, columns, sections, european, reference_policy="simulated", simulation_revision=1):
+def check_projection(visible, normalized, columns, sections, european, reference_policy="simulated", simulation_revision=1,
+                     *, print_names=None):
     from .value_generator import ValueGenerator
     from .correlation_engine import _AUTO_DIFFERENTIAL
     differential = {}
     if type(columns) is not int or columns not in (3, 4, 5, 6) or type(sections) is not bool or type(european) is not bool:
         raise ValueError("Invalid report layout")
-    def identity(row):
-        return (row["loinc"], " ".join(row["test_name"].split()), row["unit"])
-    raw = {identity(row): row for row in normalized}
-    if len(raw) != len(normalized) or len({row["loinc"] for row in normalized}) != len(raw):
+    aliases = print_names if print_names is not None else {}
+    raw = {row["loinc"]: row for row in normalized}
+    if len(raw) != len(normalized):
         raise ValueError("Duplicate analyte in a synthetic report")
+    if len(visible) != len(raw) or {row["loinc"] for row in visible} != raw.keys():
+        raise ValueError("Visible and normalized analyte identities differ")
     has_total_cholesterol = any(row["loinc"] == "2093-3" and row["unit"] == "mg/dL" for row in normalized)
     for row in visible:
-        original = raw[identity(row)]
+        code = row["loinc"]
+        original = raw[code]
+        expected_name = aliases.get(code, " ".join(original["test_name"].split()))
+        if row["test_name"] != expected_name or row["unit"] != original["unit"]:
+            raise ValueError(f"Name or unit differs from the expected visible label for {code}")
         value, reference = original["value"], original["reference_range"]
         if original["flag"] not in (None, "L", "H", "A"):
             raise ValueError("Unknown normalized flag")
@@ -300,9 +306,13 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
     revision = meta.get("simulation_revision", 1)
     if type(revision) is not int or revision not in {1, 2, 3, 4} or (revision >= 2 and not modern):
         raise ValueError("Invalid simulation revision")
+    name_style = meta.get("name_style", "catalog")
+    if name_style not in ("catalog", "routine-es") or (revision < 4 and name_style != "catalog"):
+        raise ValueError("Invalid test name style for simulation revision")
     extended = meta.get("numeric_vocabulary") != "guarded"
+    print_names = {}
     try:
-        composer = ReportComposer(str(data_dir), include_heuristic_numerics=extended)
+        composer = ReportComposer(str(data_dir), include_heuristic_numerics=extended, name_style=name_style)
     except ValueError as exc:
         # An archived custom input may consist exclusively of a now-excluded
         # term. Its artifact vocabulary is still reconstructed below.
@@ -313,6 +323,7 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
         units, name_keys = {}, {}
     else:
         input_paths = composer.input_paths
+        print_names = composer.print_names
         name_keys = {code: {" ".join(label.split()) for label in composer.allowed_names(code)}
                      for code in composer.eligible_loincs}
         units = {code: set(composer.allowed_units(code)) for code in composer.eligible_loincs}
@@ -456,7 +467,6 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                 results = target["results"]
                 if not isinstance(results, list) or not results or len(results) != rec["result_count"]:
                     raise ValueError(f"Invalid {field} result count")
-                triples = Counter()
                 for row in results:
                     code = row["loinc"]
                     if code not in eligible:
@@ -465,22 +475,22 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                         raise ValueError("Invalid result fields")
                     if not all(isinstance(row[key], str) for key in ("unit", "test_name", "reference_range", "panel", "value")) or not row["value"].strip():
                         raise ValueError("Missing or invalid result text")
-                    if " ".join(row["test_name"].split()) not in name_keys[code] or row["unit"] not in units[code]:
+                    # Normalized annotations retain the selected same-code catalog name.
+                    # check_projection verifies each printed name against that exact row.
+                    if ((field == "normalized_ground_truth" and " ".join(row["test_name"].split()) not in name_keys[code])
+                            or row["unit"] not in units[code]):
                         raise ValueError(f"Name or unit is inconsistent with LOINC {code}")
                     if revision >= 4 and terms[code]["scale"] == "Ord" and row["value"] not in {"Positivo", "Negativo"}:
                         raise ValueError(f"Unexpected literal binary answer for {code}")
                     if revision >= 4 and terms[code]["property"] == "Titr" and not re.fullmatch(r"1:[1-9][0-9]*", row["value"]):
                         raise ValueError(f"Invalid synthetic dilution format for {code}")
-                    triples[(code, row["unit"], " ".join(row["test_name"].split()))] += 1
                     if field == "ground_truth":
                         code_counts[code] += 1
                         names.add(row["test_name"])
-                targets[field] = (target, triples)
-            if targets["ground_truth"][1] != targets["normalized_ground_truth"][1]:
-                raise ValueError("Visible and normalized analyte identities differ")
-            check_projection(targets["ground_truth"][0]["results"], targets["normalized_ground_truth"][0]["results"],
-                             rec["column_count"], rec["show_sections"], meta["european"], reference_policy, revision)
-            labels = targets["ground_truth"][0]["results"]
+                targets[field] = target
+            labels = targets["ground_truth"]["results"]
+            check_projection(labels, targets["normalized_ground_truth"]["results"], rec["column_count"], rec["show_sections"],
+                             meta["european"], reference_policy, revision, print_names=print_names)
             receipt = _checked_json(root, coordinate_path, rec["sha256"]) if coordinates else None
             if pdf:
                 with closing(pypdfium2.PdfDocument(root / pdf)) as doc:
@@ -501,7 +511,7 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
             elif coordinates:
                 _check_coordinate_pages(receipt, rec, labels, [], image_sizes)
             for kind, row in zip(streams, records[1:]):
-                check_training_record(kind, row, images, targets["ground_truth"][0])
+                check_training_record(kind, row, images, targets["ground_truth"])
             profiles[rec["profile"]] += 1
             regions[rec["region"]] += 1
             n_pages += pages

@@ -54,6 +54,8 @@ SOURCE_FILES = (
     "scripts/lib/synonym_engine.py",
     "scripts/lib/template_engine.py",
     "scripts/lib/terminology.py",
+    "scripts/lib/resources/routine_es_names.json",
+    "scripts/lib/test_routine_es_names.py",
     "scripts/lib/value_generator.py",
     "scripts/lib/test_degradation_engine.py",
     "scripts/lib/test_ground_truth_writer.py",

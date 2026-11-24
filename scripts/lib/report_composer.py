@@ -28,7 +28,7 @@ from .correlation_engine import (
     CorrelationEngine,
     PathologicalProfile,
 )
-from .terminology import CATALOG_PATH, POLICY_PATH, load_terms, simulation_names
+from .terminology import CATALOG_PATH, POLICY_PATH, ROUTINE_ES_NAMES_PATH, load_terms, simulation_names
 from .synonym_engine import SynonymEngine, SynonymSelection
 from .value_generator import ValueGenerator
 
@@ -248,11 +248,12 @@ class ReportComposer:
     coverage guarantees.
     """
 
-    def __init__(self, data_dir: str, *, include_heuristic_numerics: bool = True) -> None:
+    def __init__(self, data_dir: str, *, include_heuristic_numerics: bool = True, name_style: str = "catalog") -> None:
         """Load all data files and initialize engines.
 
         Args:
             data_dir: Path to ``src/paddle_ocr/dictionaries/data/`` directory.
+            name_style: Printed test names. Direct callers default to catalog rotation.
         """
         self._data_dir = Path(data_dir)
 
@@ -274,6 +275,14 @@ class ReportComposer:
             "loinc_2_82": CATALOG_PATH,
             "simulation_policy": POLICY_PATH,
         }
+
+        if name_style not in ("catalog", "routine-es"):
+            raise ValueError(f"Unknown test name style: {name_style}")
+        self.print_names: dict[str, str] = {}
+        if name_style == "routine-es":
+            with ROUTINE_ES_NAMES_PATH.open(encoding="utf-8") as stream:
+                self.print_names = json.load(stream)
+            self.input_paths["routine_es_names"] = ROUTINE_ES_NAMES_PATH
 
         # Load panel definitions
         with open(self._data_dir / "panel_definitions.json") as f:
@@ -331,7 +340,7 @@ class ReportComposer:
     # ------------------------------------------------------------------
 
     def allowed_names(self, code: str) -> frozenset[str]:
-        """Exact display strings admitted for this code and this input dataset."""
+        """Catalog names allowed in normalized annotations for this code."""
         if code not in self.eligible_loincs:
             raise KeyError(code)
         return frozenset(s for labels in simulation_names(code, load_terms()[code]).values() for s in labels)
@@ -722,7 +731,8 @@ class ReportComposer:
         for loinc, gv in values.items():
             panel_name = loinc_to_panel.get(loinc, "Otros")
 
-            # Select display name via SynonymEngine
+            # Keep the catalog draw in both modes. It supplies the normalized name
+            # and preserves seeded results, layouts and demographics across styles.
             selection: SynonymSelection = self._se.select(
                 loinc,
                 rng,
@@ -733,7 +743,7 @@ class ReportComposer:
             # Build the ReportTest
             rt = ReportTest(
                 loinc=loinc,
-                display_name=selection.display_name,
+                display_name=self.print_names.get(loinc, selection.display_name),
                 value=gv.value_formatted,
                 unit=gv.unit,
                 ref_range=gv.ref_formatted if simulated_reference_ranges else "",

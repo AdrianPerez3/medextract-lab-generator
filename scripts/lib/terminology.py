@@ -8,6 +8,7 @@ CATALOG_PATH = Path(__file__).with_name("resources") / "loinc_2_82.json"
 
 
 POLICY_PATH = CATALOG_PATH.with_name("simulation_policy.json")
+ROUTINE_ES_NAMES_PATH = CATALOG_PATH.with_name("routine_es_names.json")
 
 
 @lru_cache(maxsize=1)

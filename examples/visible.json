@@ -1,7 +1,7 @@
 {
   "results": [
     {
-      "test_name": "Leucocitos:Concentración de número:Punto temporal:Sangre:Qn:Contaje automático",
+      "test_name": "Leucocitos",
       "value": "6,79",
       "unit": "10*3/uL",
       "reference_range": "",
@@ -10,7 +10,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "Hematíes:Concentración de número:Punto temporal:Sangre:Qn:Contaje automático",
+      "test_name": "Hematíes",
       "value": "4,87",
       "unit": "10*6/uL",
       "reference_range": "",
@@ -19,7 +19,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "Hemoglobin [Mass/volume] in Blood",
+      "test_name": "Hemoglobina",
       "value": "14,2",
       "unit": "g/dL",
       "reference_range": "",
@@ -28,7 +28,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "Hematocrit Auto (Bld) [Volume fraction]",
+      "test_name": "Hematocrito",
       "value": "39,6",
       "unit": "%",
       "reference_range": "",
@@ -37,7 +37,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "MCV RBC Auto",
+      "test_name": "Volumen corpuscular medio (VCM)",
       "value": "81,3",
       "unit": "fL",
       "reference_range": "",
@@ -46,7 +46,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "hemoglobina corpuscular media eritrocitaria:masa entítica:punto en el tiempo:eritrocitos:cuantitativo:recuento automático",
+      "test_name": "Hemoglobina corpuscular media (HCM)",
       "value": "29,2",
       "unit": "pg",
       "reference_range": "",
@@ -55,7 +55,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "Concentración media de hemoglobina corpuscular en eritrocitos:Concentración de masa:Punto temporal:Eritrocitos:Cuantitativo:Recuento automatizado",
+      "test_name": "Conc. de hemoglobina corpuscular media (CHCM)",
       "value": "35,9",
       "unit": "g/dL",
       "reference_range": "",
@@ -64,7 +64,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "Ancho de distribución de eritrocitos:Proporción:Punto temporal:Eritrocitos:Cuantitativo:Recuento automatizado",
+      "test_name": "Amplitud de distribución eritrocitaria (RDW-CV)",
       "value": "12,2",
       "unit": "%",
       "reference_range": "",
@@ -73,7 +73,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "Platelets [#/volume] in Blood by Automated count",
+      "test_name": "Plaquetas",
       "value": "299,2",
       "unit": "10*3/uL",
       "reference_range": "",
@@ -82,7 +82,7 @@
       "panel": "Hemograma Completo"
     },
     {
-      "test_name": "Glucose [Mass/Vol]",
+      "test_name": "Glucosa",
       "value": "98,6",
       "unit": "mg/dL",
       "reference_range": "",
@@ -91,7 +91,7 @@
       "panel": "Bioquimica Basica"
     },
     {
-      "test_name": "Creatinina:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:",
+      "test_name": "Creatinina",
       "value": "0,940",
       "unit": "mg/dL",
       "reference_range": "",
@@ -100,7 +100,7 @@
       "panel": "Bioquimica Basica"
     },
     {
-      "test_name": "Urea nitrogen [Mass/Vol]",
+      "test_name": "Nitrógeno ureico (BUN)",
       "value": "16,2",
       "unit": "mg/dL",
       "reference_range": "",
@@ -109,7 +109,7 @@
       "panel": "Bioquimica Basica"
     },
     {
-      "test_name": "Albúmina:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:",
+      "test_name": "Albúmina",
       "value": "4,25",
       "unit": "g/dL",
       "reference_range": "",
@@ -118,7 +118,7 @@
       "panel": "Bioquimica Basica"
     },
     {
-      "test_name": "Proteína:Concentración de masa:Punto temporal:Suero o Plasma:Cuantitativo:",
+      "test_name": "Proteínas totales",
       "value": "7,84",
       "unit": "g/dL",
       "reference_range": "",
@@ -127,7 +127,7 @@
       "panel": "Bioquimica Basica"
     },
     {
-      "test_name": "Potasio:Concentración de sustancias:Punto temporal:Suero o Plasma:Cuantitativo:",
+      "test_name": "Potasio",
       "value": "4,26",
       "unit": "mmol/L",
       "reference_range": "",
@@ -136,7 +136,7 @@
       "panel": "Bioquimica Basica"
     },
     {
-      "test_name": "Sodium [Moles/volume] in Serum or Plasma",
+      "test_name": "Sodio",
       "value": "140,6",
       "unit": "mmol/L",
       "reference_range": "",
@@ -145,7 +145,7 @@
       "panel": "Bioquimica Basica"
     },
     {
-      "test_name": "Calcium [Mass/Vol]",
+      "test_name": "Calcio total",
       "value": "9,37",
       "unit": "mg/dL",
       "reference_range": "",

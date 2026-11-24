@@ -1,12 +1,12 @@
 # MedExtract Lab Generator — synthetic lab reports for OCR
 
-MedExtract Lab Generator creates synthetic laboratory reports in Python for evaluating OCR and table extraction. Each report has Spanish headings, Spanish or English test names, and fictional patient and clinician identifiers. The bundled vocabulary covers 32 quantitative LOINC codes.
+MedExtract Lab Generator creates synthetic laboratory reports in Python for evaluating OCR and table extraction. The default reports use concise Spanish test names and fictional patient and clinician identifiers. The bundled vocabulary covers 32 quantitative LOINC codes.
 
 Generate a vector PDF and one JPEG per page, then compare an extractor’s output with two sets of JSON labels. The printed labels preserve decimal commas, units and display names for optical character recognition (OCR). Use the normalized labels to compare numeric values and score test-name mapping to LOINC. Optional row and cell bounding boxes let you score whether each extracted value belongs to the correct test.
 
 ## Download 1,000 annotated lab reports
 
-The starter dataset contains 1,000 reports, 1,417 clean page images and 18,329 observations with row and cell coordinates. All pages of a report stay together in the training, validation or test split. You can stream a split from Hugging Face or download the PDFs, images and labels as Parquet files. [MedExtract Synthetic Lab Reports on Hugging Face](https://huggingface.co/datasets/AdrianPerez3/medextract-synthetic-lab-reports-starter)
+The published v0.1.0 starter uses catalog-style test names. It contains 1,000 reports, 1,417 clean page images and 18,329 observations with row and cell coordinates. All pages of a report stay together in the training, validation or test split. You can stream a split from Hugging Face or download the PDFs, images and labels as Parquet files. [MedExtract Synthetic Lab Reports on Hugging Face](https://huggingface.co/datasets/AdrianPerez3/medextract-synthetic-lab-reports-starter)
 
 In the starter’s worked example, glucose reads `163,6` and creatinine reads `1,49`. Swapping the value locations along with their text leaves both numbers transcribed correctly. The scorer then credits zero correct test-to-value associations. [Run the row-association scoring example](https://huggingface.co/datasets/AdrianPerez3/medextract-synthetic-lab-reports-starter/blob/main/examples/README.md)
 
@@ -14,7 +14,7 @@ In the starter’s worked example, glucose reads `163,6` and creatinine reads `1
 
 **Sample report** · [PDF](examples/report.pdf) · [JPEG](examples/report.jpg) · [Printed rows with LOINC annotations](examples/visible.json) · [Normalized rows](examples/normalized.json)
 
-In the first row of the sample, the printed white blood cell count is `6,79` in `10*3/uL`. The normalized JSON stores the string `"6.79"`. Both targets identify the observation as LOINC `6690-2`, so you can score the transcription and the code assignment separately.
+In the first row of the sample, the printed name is `Leucocitos` and the result is `6,79` in `10*3/uL`. The normalized JSON stores the string `"6.79"`. Both targets identify the observation as LOINC `6690-2`, so you can score the transcription and the code assignment separately.
 
 Para evaluar el OCR de informes de laboratorio en español, compara la coma decimal y la unidad con el texto impreso. Usa las coordenadas de las celdas para comprobar que cada resultado corresponde a la prueba correcta.
 
@@ -32,7 +32,7 @@ python scripts/validate_synthetic_dataset.py --dataset demo-run --expected-count
 
 On Windows PowerShell, create the environment with `py -3.11 -m venv .venv` and activate it with `.\.venv\Scripts\Activate.ps1`. Installing dependencies requires a package index or local wheels. Generation runs offline.
 
-The checked run produced **16 reports, 20 page images and 291 result rows covering all 32 demo codes**. Open `demo-run/reports.jsonl` to find each report’s media, labels and coordinate file. The sample above is `RPT_000000` from this command.
+The checked run produced **16 reports, 16 page images and 291 result rows covering all 32 demo codes**. Open `demo-run/reports.jsonl` to find each report’s media, labels and coordinate file. The sample above is `RPT_000000` from this command.
 
 The command uses clean images (tier 0) at 144 DPI. Row and cell bounds are recorded in PDF points from the top left. Image coordinates are supported for clean pages. The usage guide shows how to convert points to pixels and how to generate separate OCR stress cases with simulated blur or perspective. [Capture conditions and coordinate conventions](docs/usage.md)
 
