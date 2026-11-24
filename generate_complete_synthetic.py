@@ -557,7 +557,8 @@ def _rendered_reports(jobs, workers, *, render_images):
 
 
 def _generate(args: argparse.Namespace, output: Path) -> None:
-    composer = ReportComposer(str(args.data_dir), include_heuristic_numerics=args.include_heuristic_numerics)
+    composer = ReportComposer(str(args.data_dir), include_heuristic_numerics=args.include_heuristic_numerics,
+                              name_style=args.name_style)
     eligible = composer.eligible_loincs
     if not eligible:
         raise ValueError("The input catalog contains no eligible LOINCs")
@@ -641,7 +642,7 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
         })
     metadata = {
         "schema_version": 2, "simulation_revision": 4, "count": args.count, "seed": args.seed,
-        "format": args.format, "tiers": args.tiers, "dpi": args.dpi,
+        "format": args.format, "tiers": args.tiers, "dpi": args.dpi, "name_style": args.name_style,
         "reference_policy": "simulated" if args.simulated_reference_ranges else "omitted",
         "profile_kind": "synthetic_generation_scenario",
         "numeric_vocabulary": "extended_simulation" if args.include_heuristic_numerics else "guarded",
@@ -679,6 +680,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="Include historical heuristic numeric envelopes for synthetic stress testing")
     parser.add_argument("--simulated-reference-ranges", action="store_true",
                         help="Print and export explicitly simulated reference intervals and flags")
+    parser.add_argument("--name-style", choices=("routine-es", "catalog"), default="routine-es",
+                        help="Print short Spanish lab names for mapped codes (default), "
+                             "or rotate same-code terminology labels with catalog")
     parser.add_argument("--format", choices=["pdf", "jpg", "both"], default="both")
     parser.add_argument("--coordinates", action="store_true",
                         help="Write PDF-point row and cell boxes (page images require --tiers 1,0,0,0,0)")

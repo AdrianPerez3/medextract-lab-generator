@@ -144,10 +144,10 @@ def test_legacy_v2_projection_still_accepts_simulated_intervals(tmp_path):
     write(data / "loinc_metadata.json", {})
     write(data / "panel_definitions.json", {"panels":[]})
     assert generator.main(["--output", str(root), "--data-dir", str(data), "--count", "1", "--format", "pdf",
-                           "--include-heuristic-numerics", "--simulated-reference-ranges"]) == 0
+                           "--include-heuristic-numerics", "--simulated-reference-ranges", "--name-style", "catalog"]) == 0
     path = root / "metadata.json"
     meta = read(path)
-    for key in ("numeric_vocabulary", "reference_policy", "profile_kind", "dpi", "simulation_revision"):
+    for key in ("numeric_vocabulary", "reference_policy", "profile_kind", "dpi", "simulation_revision", "name_style"):
         del meta[key]
     del meta["input_sha256"]["simulation_policy"]
     write(path, meta)
@@ -451,3 +451,45 @@ def test_negative_coverage_has_a_cli_error_message(clean, capsys):
     from scripts.validate_synthetic_dataset import main
     assert main(["--dataset", str(clean), "--min-loinc", "-1"]) == 1
     assert "negative" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("mutation,reason", [
+    ("remove-style", "Input hash inventory"),
+    ("unknown-style", "Invalid test name style"),
+    ("resource-hash", "input digest differs"),
+    ("technical-print", "Name or unit"),
+    ("wrong-catalog-name", "Name or unit"),
+])
+def test_name_style_binds_both_annotation_forms_and_alias_file(tmp_path, clean, mutation, reason):
+    root = tmp_path / "run"
+    shutil.copytree(clean, root)
+    metadata = root / "metadata.json"
+    settings = read(metadata)
+    if mutation == "remove-style":
+        del settings["name_style"]
+    elif mutation == "unknown-style":
+        settings["name_style"] = "unknown"
+    elif mutation == "resource-hash":
+        settings["input_sha256"]["routine_es_names"] = "0" * 64
+    else:
+        manifest = root / "reports.jsonl"
+        rec = read(manifest)
+        if mutation == "technical-print":
+            field = "ground_truth"
+            normalized = {r["loinc"]: r["test_name"] for r in read(root / rec["normalized_ground_truth"])["results"]}
+        else:
+            field = "normalized_ground_truth"
+        path = root / rec[field]
+        labels = read(path)
+        rows = labels["results"]
+        if mutation == "technical-print":
+            row = next(r for r in rows if r["test_name"] != normalized[r["loinc"]])
+            row["test_name"] = normalized[row["loinc"]]
+        else:
+            rows[0]["test_name"] = rows[1]["test_name"]
+        write(path, labels)
+        rec["sha256"][rec[field]] = hashlib.sha256(path.read_bytes()).hexdigest()
+        write(manifest, rec)
+    write(metadata, settings)
+    with pytest.raises(ValueError, match=reason):
+        check_run(root, DATA, 0)

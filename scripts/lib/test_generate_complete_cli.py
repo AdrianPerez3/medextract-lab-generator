@@ -244,3 +244,55 @@ def test_custom_metadata_can_include_rank_as_exported_text(tmp_path):
     (data / "loinc_metadata.json").write_text('{"6690-2":{"COMMON_TEST_RANK":"1"}}')
     result = cli(tmp_path / "run", "--data-dir", str(data), "--count", "1", "--format", "pdf")
     assert result.returncode == 0, result.stderr
+
+
+def test_routine_names_share_seeded_catalog_annotations_and_match_printed_cells(tmp_path):
+    from scripts.lib.dataset_integrity import check_run
+
+    outputs = {}
+    for style, options in (("routine-es", []), ("catalog", ["--name-style", "catalog"])):
+        out = tmp_path / style
+        result = cli(out, "--format", "both", "--count", "2", "--coordinates",
+                     "--tiers", "1,0,0,0,0", *options)
+        assert result.returncode == 0, result.stderr
+        # Reads the PDF text inside each annotated cell and validates training targets.
+        assert check_run(out, generator._DATA_DIR, 0, verify_source=True)["reports"] == 2
+        settings = json.loads((out / "metadata.json").read_bytes())
+        assert settings["name_style"] == style
+        assert ("routine_es_names" in settings["input_sha256"]) == (style == "routine-es")
+        outputs[style] = records(out / "reports.jsonl")
+
+    from scripts.lib.terminology import ROUTINE_ES_NAMES_PATH
+    routine_names = json.loads(ROUTINE_ES_NAMES_PATH.read_bytes())
+    for routine, catalog in zip(outputs["routine-es"], outputs["catalog"], strict=True):
+        assert (routine["report_id"], routine["seed"]) == (catalog["report_id"], catalog["seed"])
+        assert (tmp_path / "routine-es" / routine["normalized_ground_truth"]).read_bytes() == (
+            tmp_path / "catalog" / catalog["normalized_ground_truth"]).read_bytes()
+        printed = json.loads((tmp_path / "routine-es" / routine["ground_truth"]).read_bytes())["results"]
+        rotated = json.loads((tmp_path / "catalog" / catalog["ground_truth"]).read_bytes())["results"]
+        assert printed == [{**row, "test_name": routine_names[row["loinc"]]} for row in rotated]
+
+    # Earlier schema-v2 sets have catalog spellings and no name-style field.
+    metadata = tmp_path / "catalog" / "metadata.json"
+    settings = json.loads(metadata.read_bytes())
+    del settings["name_style"]
+    metadata.write_text(json.dumps(settings), encoding="utf-8")
+    assert check_run(tmp_path / "catalog", generator._DATA_DIR, 0)["reports"] == 2
+
+
+def test_unmapped_codes_keep_their_selected_catalog_name(tmp_path, monkeypatch):
+    from scripts.lib import report_composer
+    from scripts.lib.dataset_integrity import check_run
+
+    # Simulate a local catalog whose eligible codes lie outside the reviewed alias map.
+    subset = tmp_path / "unmapped.json"
+    subset.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(report_composer, "ROUTINE_ES_NAMES_PATH", subset)
+    out = tmp_path / "unmapped"
+    assert generator.main(["--count", "1", "--workers", "1", "--format", "pdf",
+                           "--coordinates", "--output", str(out)]) == 0
+    (record,) = records(out / "reports.jsonl")
+    visible = json.loads((out / record["ground_truth"]).read_bytes())["results"]
+    canonical = json.loads((out / record["normalized_ground_truth"]).read_bytes())["results"]
+    assert {r["loinc"]: r["test_name"] for r in visible} == {r["loinc"]: r["test_name"] for r in canonical}
+    assert check_run(out, generator._DATA_DIR, 0)["reports"] == 1

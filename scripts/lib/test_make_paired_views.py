@@ -42,6 +42,9 @@ def source(tmp_path):
             [
                 "--count",
                 "2",
+                # Long catalog titles produce a multi-page source in this fixture.
+                "--name-style",
+                "catalog",
                 "--format",
                 "jpg",
                 "--coordinates",

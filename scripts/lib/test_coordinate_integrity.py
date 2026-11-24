@@ -30,8 +30,11 @@ def clean(tmp_path_factory):
     result = {}
     for fmt, count in (("both", 1), ("pdf", 8), ("jpg", 1)):
         root = tmp_path_factory.mktemp("coordinates") / fmt
+        # Long catalog titles exercise page breaks in the PDF fixture.
+        name_style = "catalog" if fmt == "pdf" else "routine-es"
         assert generator.main(["--output", str(root), "--seed", "42", "--count", str(count), "--workers", "1",
-                               "--format", fmt, "--tiers", "1,0,0,0,0", "--dpi", "72", "--coordinates"]) == 0
+                               "--format", fmt, "--tiers", "1,0,0,0,0", "--dpi", "72", "--coordinates",
+                               "--name-style", name_style]) == 0
         result[fmt] = root
     return result
 

@@ -8,8 +8,14 @@ The report headings use simulation tokens for people. The patient label begins w
 |---|---|
 | `pdfs/` and `images/` | Read the vector report or test OCR on its page JPEGs. |
 | `ground_truth/` | Compare extracted rows with the display spellings, decimal punctuation and units. The LOINC field is an annotation for the observation. |
-| `normalized_ground_truth/` | Compare the underlying structured rows, where numeric values are strings with a decimal point. A layout can reorder the printed rows, so avoid matching the two files solely by array position. |
+| `normalized_ground_truth/` | Compare the underlying structured rows, where numeric values are strings with a decimal point and `test_name` carries the selected catalog term. A layout can reorder the printed rows, so avoid matching the two files solely by array position. |
 | `metadata.json` and `coverage_report.json` | Inspect run settings, source and input fingerprints, software versions and observed code counts. |
+
+## Choose the printed test names
+
+The default `--name-style routine-es` uses a short Spanish label for each of the 32 demo codes. For example, the report distinguishes `Hematíes`, `Hemoglobina corpuscular media (HCM)` and `Hemoglobina`. Use `ground_truth/` to score the literal text on the page, and join to `normalized_ground_truth/` by report ID and LOINC to inspect the corresponding catalog term.
+
+Use `--name-style catalog` to exercise terminology extraction with the earlier mix of code-bound Spanish and English names. This is the naming style used in starter v0.1.0. In a build with a larger pinned LOINC catalog, codes outside the 32-name lookup retain their catalog labels. A shorter printed name can change wrapping, pagination and cell coordinates. Always take the sidecar and image from the same run.
 
 ## Choose the capture conditions
 
@@ -50,8 +56,8 @@ To score an extraction, supply one point inside the printed test name and one in
 {
   "report_id": "RPT_000000",
   "predictions": [
-    {"page": 1, "test_point": [78, 148], "value_point": [294, 148], "value_text": "6,79"},
-    {"page": 1, "test_point": [76, 171], "value_point": [294, 171], "value_text": "4,87"}
+    {"page": 1, "test_point": [55, 147], "value_point": [294, 147], "value_text": "6,79"},
+    {"page": 1, "test_point": [53, 159], "value_point": [294, 159], "value_text": "4,87"}
   ]
 }
 ```
