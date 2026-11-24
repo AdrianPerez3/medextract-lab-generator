@@ -31,36 +31,42 @@ from typing import Any
 # Prompt variants -- 6 rotations to prevent overfitting to one prompt
 # ---------------------------------------------------------------------------
 
-PROMPT_VARIANTS: list[str] = [
-    "Extrae todos los resultados de laboratorio de este informe medico en formato JSON.",
+_ROUTINE_ES_PROMPTS = [
+    "Extrae todos los resultados de laboratorio de este informe médico en formato JSON.",
     (
         "Analiza este informe de laboratorio y extrae los resultados con "
-        "nombre del test, valor, unidad, rango de referencia y codigo LOINC."
+        "nombre del test, valor, unidad, rango de referencia y código LOINC."
     ),
     (
-        "Identifica y extrae todos los analisis clinicos de este informe. "
+        "Identifica y extrae todos los análisis clínicos de este informe. "
         "Devuelve JSON con test_name, value, unit, reference_range, flag y loinc."
     ),
     (
-        "Procesa este informe de analisis clinicos y devuelve los resultados "
+        "Procesa este informe de análisis clínicos y devuelve los resultados "
         "estructurados en formato JSON."
     ),
     (
-        "Extrae la informacion de cada prueba de laboratorio de esta imagen: "
-        "nombre, resultado, unidades, valores de referencia y codigo LOINC."
+        "Extrae la información de cada prueba de laboratorio de esta imagen: "
+        "nombre, resultado, unidades, valores de referencia y código LOINC."
     ),
     (
-        "Lee este informe de laboratorio medico y genera un JSON con todos "
+        "Lee este informe de laboratorio médico y genera un JSON con todos "
         "los resultados encontrados."
     ),
 ]
 
-SYSTEM_PROMPT: str = (
-    "Eres un experto en interpretacion de informes de laboratorio medico. "
+_ROUTINE_ES_SYSTEM = (
+    "Eres un experto en interpretación de informes de laboratorio médico. "
     "Extrae todos los resultados de laboratorio del informe proporcionado "
     "y devuelve un JSON estructurado con los campos: test_name, value, unit, "
-    "reference_range, flag (H/L/null) y loinc (codigo LOINC)."
+    "reference_range, flag (H/L/null) y loinc (código LOINC)."
 )
+
+# The catalog-style training exports predate accented prompt text. Preserve
+# those public constants and their exact bytes for existing writer callers.
+_LEGACY_ACCENTS = str.maketrans("áéíóú", "aeiou")
+PROMPT_VARIANTS = [prompt.translate(_LEGACY_ACCENTS) for prompt in _ROUTINE_ES_PROMPTS]
+SYSTEM_PROMPT = _ROUTINE_ES_SYSTEM.translate(_LEGACY_ACCENTS)
 
 # ---------------------------------------------------------------------------
 # DPO rejection error patterns
@@ -105,7 +111,7 @@ class GroundTruthWriter:
     - GRPO (Group Relative Policy Optimization): prompt-only with solution key
     """
 
-    def __init__(self, output_dir: Path, images_subdir: str = "images") -> None:
+    def __init__(self, output_dir: Path, images_subdir: str = "images", *, routine_spanish: bool = False) -> None:
         """Initialize the writer.
 
         Args:
@@ -115,16 +121,17 @@ class GroundTruthWriter:
         self.output_dir = Path(output_dir)
         self.images_dir = self.output_dir / images_subdir
         self.images_dir.mkdir(parents=True, exist_ok=True)
+        self._prompts = _ROUTINE_ES_PROMPTS if routine_spanish else PROMPT_VARIANTS
+        self._system_prompt = _ROUTINE_ES_SYSTEM if routine_spanish else SYSTEM_PROMPT
 
         self._streams: dict[str, TextIOWrapper] = {}
         self._counts = {"sft": 0, "dpo": 0, "grpo": 0}
 
-    @staticmethod
-    def _image_prompt(image_path: str | list[str], seed: int) -> tuple[list[str], str]:
+    def _image_prompt(self, image_path: str | list[str], seed: int) -> tuple[list[str], str]:
         images = [image_path] if isinstance(image_path, str) else image_path
         if not images or not all(isinstance(path, str) and path for path in images):
             raise ValueError("An image path is required for each report page")
-        prompt = PROMPT_VARIANTS[seed % len(PROMPT_VARIANTS)]
+        prompt = self._prompts[seed % len(self._prompts)]
         return images, "<image>" * len(images) + prompt
 
     def write_examples(
@@ -147,7 +154,7 @@ class GroundTruthWriter:
         negative = None
         if dpo_rejected is not None:
             negative = json.dumps(dpo_rejected, ensure_ascii=False, separators=(",", ":"))
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
+        messages = [{"role": "system", "content": self._system_prompt}, {"role": "user", "content": prompt}]
         if sft or negative is not None:
             conversation = [*messages, {"role": "assistant", "content": chosen}]
             if sft:

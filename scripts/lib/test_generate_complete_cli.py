@@ -248,6 +248,7 @@ def test_custom_metadata_can_include_rank_as_exported_text(tmp_path):
 
 def test_routine_names_share_seeded_catalog_annotations_and_match_printed_cells(tmp_path):
     from scripts.lib.dataset_integrity import check_run
+    from scripts.lib.template_engine import printed_panel_name
 
     outputs = {}
     for style, options in (("routine-es", []), ("catalog", ["--name-style", "catalog"])):
@@ -259,7 +260,13 @@ def test_routine_names_share_seeded_catalog_annotations_and_match_printed_cells(
         assert check_run(out, generator._DATA_DIR, 0, verify_source=True)["reports"] == 2
         settings = json.loads((out / "metadata.json").read_bytes())
         assert settings["name_style"] == style
+        assert settings["template_text_revision"] == (2 if style == "routine-es" else 1)
         assert ("routine_es_names" in settings["input_sha256"]) == (style == "routine-es")
+        for kind in ("sft", "dpo", "grpo"):
+            for training_row in records(out / f"{kind}_train.jsonl"):
+                system, prompt = training_row["messages"][:2]
+                assert ("interpretación" in system["content"]) == (style == "routine-es")
+                assert any(c in prompt["content"] for c in "áéíóú") == (style == "routine-es")
         outputs[style] = records(out / "reports.jsonl")
 
     from scripts.lib.terminology import ROUTINE_ES_NAMES_PATH
@@ -270,12 +277,14 @@ def test_routine_names_share_seeded_catalog_annotations_and_match_printed_cells(
             tmp_path / "catalog" / catalog["normalized_ground_truth"]).read_bytes()
         printed = json.loads((tmp_path / "routine-es" / routine["ground_truth"]).read_bytes())["results"]
         rotated = json.loads((tmp_path / "catalog" / catalog["ground_truth"]).read_bytes())["results"]
-        assert printed == [{**row, "test_name": routine_names[row["loinc"]]} for row in rotated]
+        assert printed == [{**row, "test_name": routine_names[row["loinc"]],
+                            "panel": printed_panel_name(row["panel"], 2)} for row in rotated]
 
     # Earlier schema-v2 sets have catalog spellings and no name-style field.
     metadata = tmp_path / "catalog" / "metadata.json"
     settings = json.loads(metadata.read_bytes())
     del settings["name_style"]
+    del settings["template_text_revision"]
     metadata.write_text(json.dumps(settings), encoding="utf-8")
     assert check_run(tmp_path / "catalog", generator._DATA_DIR, 0)["reports"] == 2
 

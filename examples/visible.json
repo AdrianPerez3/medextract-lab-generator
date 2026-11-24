@@ -7,7 +7,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "6690-2",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Hematíes",
@@ -16,7 +16,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "789-8",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Hemoglobina",
@@ -25,7 +25,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "718-7",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Hematocrito",
@@ -34,7 +34,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "4544-3",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Volumen corpuscular medio (VCM)",
@@ -43,7 +43,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "787-2",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Hemoglobina corpuscular media (HCM)",
@@ -52,7 +52,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "785-6",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Conc. de hemoglobina corpuscular media (CHCM)",
@@ -61,7 +61,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "786-4",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Amplitud de distribución eritrocitaria (RDW-CV)",
@@ -70,7 +70,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "788-0",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Plaquetas",
@@ -79,7 +79,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "777-3",
-      "panel": "Hemograma Completo"
+      "panel": "Hemograma completo"
     },
     {
       "test_name": "Glucosa",
@@ -88,7 +88,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "2345-7",
-      "panel": "Bioquimica Basica"
+      "panel": "Bioquímica básica"
     },
     {
       "test_name": "Creatinina",
@@ -97,7 +97,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "2160-0",
-      "panel": "Bioquimica Basica"
+      "panel": "Bioquímica básica"
     },
     {
       "test_name": "Nitrógeno ureico (BUN)",
@@ -106,7 +106,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "3094-0",
-      "panel": "Bioquimica Basica"
+      "panel": "Bioquímica básica"
     },
     {
       "test_name": "Albúmina",
@@ -115,7 +115,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "1751-7",
-      "panel": "Bioquimica Basica"
+      "panel": "Bioquímica básica"
     },
     {
       "test_name": "Proteínas totales",
@@ -124,7 +124,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "2885-2",
-      "panel": "Bioquimica Basica"
+      "panel": "Bioquímica básica"
     },
     {
       "test_name": "Potasio",
@@ -133,7 +133,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "2823-3",
-      "panel": "Bioquimica Basica"
+      "panel": "Bioquímica básica"
     },
     {
       "test_name": "Sodio",
@@ -142,7 +142,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "2951-2",
-      "panel": "Bioquimica Basica"
+      "panel": "Bioquímica básica"
     },
     {
       "test_name": "Calcio total",
@@ -151,7 +151,7 @@
       "reference_range": "",
       "flag": null,
       "loinc": "17861-6",
-      "panel": "Bioquimica Basica"
+      "panel": "Bioquímica básica"
     }
   ]
 }

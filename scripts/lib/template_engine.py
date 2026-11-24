@@ -108,6 +108,39 @@ _COLUMN_FACTORIES: dict[int, Any] = {
     6: _cols_6,
 }
 
+# Presentation only. Normalized annotations and archived datasets use the
+# original panel keys. Unknown headings from custom inputs pass through.
+ROUTINE_ES_PANEL_TITLES = {
+    "Hemograma Completo": "Hemograma completo",
+    "Bioquimica Basica": "Bioquímica básica",
+    "Perfil Hepatico": "Perfil hepático",
+    "Perfil Lipidico": "Perfil lipídico",
+    "Perfil Tiroideo": "Perfil tiroideo",
+    "Coagulacion": "Coagulación",
+    "Perfil Renal": "Perfil renal",
+    "Metabolismo del Hierro": "Metabolismo del hierro",
+    "Marcadores Inflamatorios": "Marcadores inflamatorios",
+    "Enzimas Cardiacas": "Enzimas cardíacas",
+    "Enzimas Pancreaticas": "Enzimas pancreáticas",
+    "Hormonas Basicas": "Hormonas básicas",
+    "Control de Diabetes": "Control de la diabetes",
+    "Analisis de Orina": "Análisis de orina",
+    "Bioquimica": "Bioquímica",
+    "Hematologia": "Hematología",
+    "Serologia": "Serología",
+    "Microbiologia": "Microbiología",
+    "Toxicologia": "Toxicología",
+    "Otros Analisis": "Otros análisis",
+}
+
+ROUTINE_ES_COLUMN_TITLES = {"Analisis": "Análisis", "Metodo": "Método", "Flag": "Alerta"}
+
+
+def printed_panel_name(name: str, template_text_revision: int) -> str:
+    name = " ".join(name.split())
+    return ROUTINE_ES_PANEL_TITLES.get(name, name) if template_text_revision == 2 else name
+
+
 # ---------------------------------------------------------------------------
 # Valid enum values -- must match generate_30k_synthetic rendering logic
 # ---------------------------------------------------------------------------

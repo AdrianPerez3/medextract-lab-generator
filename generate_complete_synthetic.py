@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from scripts.lib.report_composer import ReportComposer, ReportContent, ReportTest, CoverageTracker
-from scripts.lib.template_engine import TemplateEngine
+from scripts.lib.template_engine import ROUTINE_ES_COLUMN_TITLES, TemplateEngine, printed_panel_name
 from scripts.lib.ground_truth_writer import GroundTruthWriter
 from scripts.lib.dataset_output import file_sha256, staged_output
 
@@ -64,7 +64,7 @@ def _table_columns(template: dict[str, Any]) -> tuple[dict[str, Any], ...]:
     return tuple(template.get("columns") or _cols_5())
 
 
-def _printed_row(test: ReportTest, panel: str, column_count: int) -> dict[str, Any]:
+def _printed_row(test: ReportTest, panel: str, column_count: int, template_text_revision: int) -> dict[str, Any]:
     """LOINC is the semantic target. All other fields transcribe visible cells."""
     def text(value: str) -> str:
         return " ".join(value.split())
@@ -76,16 +76,17 @@ def _printed_row(test: ReportTest, panel: str, column_count: int) -> dict[str, A
         "reference_range": text(test.ref_range) if column_count >= 4 else "",
         "flag": test.flag if column_count >= 5 else None,
         "loinc": test.loinc,
-        "panel": text(panel),
+        "panel": printed_panel_name(panel, template_text_revision),
     }
 
 
 def visible_ground_truth(report: ReportContent, template_config: dict[str, Any]) -> dict[str, Any]:
     """Follow the table's panel/row order and the selected layout's visible fields."""
     column_count = len(_table_columns(template_config))
+    revision = template_config.get("template_text_revision", 1)
     sections = template_config.get("show_sections", True)
     return {"results": [
-        _printed_row(test, panel if sections else "", column_count)
+        _printed_row(test, panel if sections else "", column_count, revision)
         for panel, tests in report.panels for test in tests
     ]}
 
@@ -182,6 +183,9 @@ def render_simple_pdf(
     row_height = body_size * template_config.get("row_height_factor", 1.6)
     table_style = template_config.get("table_style", "alternating")
     show_sections = template_config.get("show_sections", True)
+    revision = template_config.get("template_text_revision", 1)
+    page_label = "Página" if revision == 2 else "Pagina"
+    age_unit = ("año" if report.patient_age == 1 else "años") if revision == 2 else "anos"
 
     page_notice = "DOCUMENTO SINTÉTICO DE ENTRENAMIENTO"
     if template_config.get("reference_policy") == "simulated":
@@ -198,13 +202,15 @@ def render_simple_pdf(
         above_baseline = (row_height + ascent + descent) / 2
         coordinate_pages.append({"page": page, "width": w, "height": h, "rows": []})
 
-    def new_page() -> None:
-        nonlocal y, page
-        # Footer before page break
+    def draw_footer() -> None:
         c.setFont(font_family, 7)
         c.setFillColorRGB(0.5, 0.5, 0.5)
-        c.drawString(left, bottom - 15, f"Pagina {page}")
+        c.drawString(left, bottom - 15, f"{page_label} {page}")
         c.drawRightString(right_edge, bottom - 15, page_notice)
+
+    def new_page() -> None:
+        nonlocal y, page
+        draw_footer()
         c.showPage()
         page += 1
         if coordinate_pages is not None:
@@ -231,7 +237,7 @@ def render_simple_pdf(
     # Patient info block
     c.setFont(font_family, body_size)
     c.drawString(left, y, f"Paciente: {report.patient_name}")
-    c.drawString(left + usable_w * 0.55, y, f"Edad: {report.patient_age} anos")
+    c.drawString(left + usable_w * 0.55, y, f"Edad: {report.patient_age} {age_unit}")
     y -= body_size + 2
     c.drawString(left, y, f"ID: {report.patient_id}")
     c.drawString(left + usable_w * 0.55, y, f"Sexo: {report.patient_sex}")
@@ -260,6 +266,10 @@ def render_simple_pdf(
     for col, width in zip(columns, col_widths):
         available = width - 4
         name = col["name"]
+        if revision == 2:
+            name = ROUTINE_ES_COLUMN_TITLES.get(name, name)
+            if col["name"] == "Flag" and c.stringWidth(name, bold_family, 6) > available + 1e-6:
+                name = "Al."
         measured = c.stringWidth(name, bold_family, body_size)
         size = max(6, min(body_size, body_size * available / measured)) if measured else body_size
         lines = [name] if c.stringWidth(name, bold_family, size) <= available + 1e-6 else _wrap_cell(name, available, bold_family, size)
@@ -285,7 +295,7 @@ def render_simple_pdf(
     for panel_name, tests in report.panels:
         panel = panel_name if show_sections else ""
         for panel_idx, test in enumerate(tests):
-            row = _printed_row(test, panel, len(columns))
+            row = _printed_row(test, panel, len(columns), revision)
             cells = [
                 _wrap_cell(row.get(field) or "", width - 4, font_family, body_size)
                 for field, width in zip(fields, col_widths)
@@ -338,12 +348,7 @@ def render_simple_pdf(
             y -= lines * row_height
             row_idx += 1
 
-    # === FOOTER (final page) ===
-    c.setFont(font_family, 7)
-    c.setFillColorRGB(0.5, 0.5, 0.5)
-    c.drawString(left, bottom - 15, f"Pagina {page}")
-    c.drawRightString(right_edge, bottom - 15, page_notice)
-
+    draw_footer()
     c.save()
     return page
 
@@ -501,7 +506,7 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
         raise RuntimeError(f"{report_id}: {exc}") from exc
 
 
-def _work_items(args, output, composer, template_engine):
+def _work_items(args, output, composer, template_engine, template_text_revision):
     coverage = CoverageTracker()
     # A unique seed per report within this run, regardless of corpus size or worker count.
     # Keep JSON seeds exactly representable by common JSON/JavaScript consumers.
@@ -517,6 +522,7 @@ def _work_items(args, output, composer, template_engine):
         )
         template = template_engine.select_template_config(rng, region=report.region)
         template["reference_policy"] = "simulated" if args.simulated_reference_ranges else "omitted"
+        template["template_text_revision"] = template_text_revision
         tier = None if args.format == "pdf" else rng.choices(range(5), weights=args.tiers, k=1)[0]
         yield RenderJob(report, template, seed, tier, output, args.format, args.dpi, args.coordinates)
 
@@ -580,12 +586,13 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
     regions: Counter[str] = Counter()
     n_pages = n_images = 0
     started = time.monotonic()
-    jobs = _work_items(args, output, composer, TemplateEngine())
+    template_text_revision = 2 if args.name_style == "routine-es" else 1
+    jobs = _work_items(args, output, composer, TemplateEngine(), template_text_revision)
     with ExitStack() as stack:
         manifest = stack.enter_context((output / "reports.jsonl").open("x", encoding="utf-8"))
         writer = None
         if args.sft or args.dpo or args.grpo:
-            writer = stack.enter_context(GroundTruthWriter(output))
+            writer = stack.enter_context(GroundTruthWriter(output, routine_spanish=template_text_revision == 2))
         for index, item in enumerate(_rendered_reports(jobs, workers, render_images=args.format != "pdf"), 1):
             with (output / item["ground_truth"]).open(encoding="utf-8") as stream:
                 gt = json.load(stream)
@@ -643,6 +650,7 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
     metadata = {
         "schema_version": 2, "simulation_revision": 4, "count": args.count, "seed": args.seed,
         "format": args.format, "tiers": args.tiers, "dpi": args.dpi, "name_style": args.name_style,
+        "template_text_revision": template_text_revision,
         "reference_policy": "simulated" if args.simulated_reference_ranges else "omitted",
         "profile_kind": "synthetic_generation_scenario",
         "numeric_vocabulary": "extended_simulation" if args.include_heuristic_numerics else "guarded",
