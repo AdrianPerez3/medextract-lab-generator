@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Callable, Optional
 
-from .value_generator import GeneratedValue, ValueGenerator
+from .value_generator import GeneratedValue, ValueGenerator, _AUTO_DIFFERENTIAL
 
 
 # ---------------------------------------------------------------------------
@@ -353,10 +353,6 @@ def _mcv(sources: dict[str, float]) -> Optional[float]:
 
 # These constants assume specific input and output units. A compatible code alone
 # is insufficient (e.g. LDL arithmetic in mg/dL cannot be applied to mmol/L).
-# Same-method five-part automated leukocyte differential, as percentages.
-_AUTO_DIFFERENTIAL = ("770-8", "736-9", "5905-5", "713-8", "706-2")
-
-
 _FORMULA_UNITS = {
     "2093-3": "mg/dL", "2085-9": "mg/dL", "2571-8": "mg/dL", "13457-7": "mg/dL",
     "1751-7": "g/dL", "2885-2": "g/dL", "1759-0": "{ratio}",
@@ -644,9 +640,13 @@ class CorrelationEngine:
             if not all(map(math.isfinite, sources.values())):
                 continue
             result = formula.compute(sources)
-            if result is None or not self.vg.within_simulation_bounds(target, result):
+            if result is None:
                 continue
+            low_bound, high_bound = self.vg.simulation_bounds(target)
             value = ValueGenerator._round_value(result)
+            # Both the formula and its rounded result must fit the target's range.
+            if not (low_bound <= result <= high_bound and low_bound <= value <= high_bound):
+                continue
             low, high = self.vg.get_ref_range(target)
             values[target] = GeneratedValue(
                 value=value,

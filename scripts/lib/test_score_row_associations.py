@@ -229,6 +229,7 @@ def test_invalid_prediction(key, value):
         "row_code",
         "row_overlap",
         "cell_overlap",
+        "reversed_columns",
         "missing_cell",
         "cell_bounds",
         "page_order",
@@ -249,6 +250,9 @@ def test_rejects_ambiguous_or_unbound_input(damage):
         "cell_overlap": (row["cells"], "value", [54, 30, 75, 40]),
         "missing_cell": (row, "cells", {"value": [55, 30, 75, 40]}),
         "cell_bounds": (row["cells"], "value", [55, 30, 175, 40]),
+        "reversed_columns": (
+            row, "cells", {**row["cells"], "test_name": row["cells"]["value"], "value": row["cells"]["test_name"]},
+        ),
         "page_order": (page, "page", 2),
         "page_size": (page, "height", float("nan")),
         "space": (c, "coordinate_space", "pdf_points_bottom_left"),

@@ -243,10 +243,10 @@ def validate_dataset(
     Returns:
         Validation report dict.
     """
-    if min_loinc < 0:
-        return {"passed": False, "error": "Minimum coverage cannot be negative"}
     metadata = dataset_dir / "metadata.json"
     try:
+        if min_loinc < 0:
+            raise ValueError("Minimum coverage cannot be negative")
         settings = read_json(metadata) if metadata.is_file() else {}
         version = settings.get("schema_version")
         if version is not None or (dataset_dir / "reports.jsonl").exists() or (dataset_dir / "normalized_ground_truth").exists():
@@ -269,7 +269,7 @@ def validate_dataset(
     # 0. Basic directory checks
     # ---------------------------------------------------------------
     gt_dir = dataset_dir / "ground_truth"
-    if not gt_dir.exists():
+    if not gt_dir.is_dir():
         print(f"ERROR: {gt_dir} not found")
         report["passed"] = False
         report["error"] = "ground_truth directory not found"
@@ -351,14 +351,17 @@ def validate_dataset(
     # ---------------------------------------------------------------
     coverage_path = dataset_dir / "coverage_report.json"
     if coverage_path.exists():
-        with open(coverage_path, "r", encoding="utf-8") as f:
-            coverage_data = json.load(f)
-        profile_counter = Counter(coverage_data.get("profiles", {}))
-        region_counter = Counter(coverage_data.get("regions", {}))
-        template_counter = Counter(coverage_data.get("templates", {}))
-    else:
-        # Fallback: no profile/region data from coverage_report
-        pass
+        try:
+            coverage_data = read_json(coverage_path)
+            if not isinstance(coverage_data, dict):
+                raise ValueError("expected an object")
+            for field, counts in (("profiles", profile_counter), ("regions", region_counter), ("templates", template_counter)):
+                distribution = coverage_data.get(field, {})
+                if not isinstance(distribution, dict) or any(type(n) is not int or n < 0 for n in distribution.values()):
+                    raise ValueError(f"invalid {field} counts")
+                counts.update(distribution)
+        except (ValueError, OSError) as exc:
+            failures.append(f"Invalid coverage_report.json: {exc}")
 
     # ---------------------------------------------------------------
     # 4. LOINC coverage analysis
@@ -405,7 +408,9 @@ def validate_dataset(
 
     pdf_count = img_count = small_pdfs = empty_pdfs = 0
     extra_pdf = extra_image = False
-    if pdf_dir.exists():
+    if pdf_dir.exists() and not pdf_dir.is_dir():
+        failures.append("Expected a pdfs directory")
+    if pdf_dir.is_dir():
         with os.scandir(pdf_dir) as entries:
             for entry in entries:
                 if not entry.name.endswith(".pdf") or not entry.is_file():
@@ -419,7 +424,9 @@ def validate_dataset(
                     media_by_id[report_id] |= 1
                 else:
                     extra_pdf = True
-    if img_dir.exists():
+    if img_dir.exists() and not img_dir.is_dir():
+        failures.append("Expected an images directory")
+    if img_dir.is_dir():
         with os.scandir(img_dir) as entries:
             for entry in entries:
                 if not entry.name.endswith((".jpg", ".png")) or not entry.is_file():
@@ -475,8 +482,10 @@ def validate_dataset(
     if settings.get("count", report_count) != report_count:
         failures.append("Report count differs from legacy metadata")
     fmt = settings.get("format")
-    if ((fmt in ("both", "pdf") and (extra_pdf or any(not mask & 1 for mask in media_by_id.values())))
-            or (fmt in ("both", "jpg") and (extra_image or any(not mask & 2 for mask in media_by_id.values())))):
+    if extra_pdf or extra_image:
+        failures.append("Legacy media with no matching ground truth")
+    if ((fmt in ("both", "pdf") and any(not mask & 1 for mask in media_by_id.values()))
+            or (fmt in ("both", "jpg") and any(not mask & 2 for mask in media_by_id.values()))):
         failures.append("Legacy output format and media IDs disagree")
     if not report_count or not total_tests or orphaned_gt:
         failures.append("Missing report, result or media files")

@@ -23,6 +23,8 @@ from .terminology import load_terms, simulation_names
 
 def strip_accents(text: str) -> str:
     """Remove diacritical marks: a->a, e->e, i->i, o->o, u->u, n->n, u->u."""
+    if text.isascii():
+        return text
     nfkd = unicodedata.normalize("NFKD", text)
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
@@ -173,18 +175,11 @@ class SynonymEngine:
 
         # BUG 5 fix: prefer longer names (>=4 chars) to avoid ultra-short
         # abbreviations like "K+", "Hb", "Na" dominating the output
-        entries_to_choose = entries
         if len(entries) > 1:
             long_entries = [e for e in entries if len(e.display_name) >= 4]
             if long_entries and rng.random() < 0.85:
-                entries_to_choose = long_entries
-            else:
-                entries_to_choose = entries  # Fallback to ALL entries including short
-        # Safety check: if filtering somehow left us empty, fall back to full list
-        if not entries_to_choose:
-            entries_to_choose = entries
-
-        return rng.choice(entries_to_choose)
+                return rng.choice(long_entries)
+        return rng.choice(entries)
 
     @staticmethod
     def _apply_case(text: str, rng: random.Random) -> tuple[str, str]:

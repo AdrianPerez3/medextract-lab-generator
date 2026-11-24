@@ -390,3 +390,64 @@ def test_training_jsonl_rejects_nonstandard_numbers_and_keeps_scanning_legacy(tm
     assert "sft_train.jsonl:2" in errors[0] and "sft_train.jsonl:3" in errors[1]
     with pytest.raises(ValueError, match="sft_train.jsonl:2: invalid JSON"):
         list(json_lines(path))
+
+
+def test_legacy_orphan_media_without_format_metadata(tmp_path):
+    from scripts.validate_synthetic_dataset import validate_dataset
+    (tmp_path / "ground_truth").mkdir()
+    (tmp_path / "images").mkdir()
+    write(tmp_path / "ground_truth/report.json", {"results": [{"loinc": "718-7", "test_name": "Hb", "value": "7"}]})
+    for name in ("report.jpg", "orphan.jpg"):
+        (tmp_path / "images" / name).write_bytes(b"synthetic fixture")
+    report = validate_dataset(tmp_path)
+    assert not report["passed"] and any("no matching ground truth" in error for error in report["failures"])
+
+
+@pytest.mark.parametrize("bad", [[], {"profiles": ["fake"]}, {"regions": {"demo": "1"}},
+                                 {"templates": {"demo": True}}, {"profiles": {"demo": -1}}])
+def test_legacy_malformed_coverage_returns_failed_receipt(tmp_path, bad):
+    from scripts.validate_synthetic_dataset import validate_dataset
+    (tmp_path / "ground_truth").mkdir()
+    (tmp_path / "images").mkdir()
+    write(tmp_path / "ground_truth/report.json", {"results": [{"loinc": "718-7", "test_name": "Hb", "value": "7"}]})
+    (tmp_path / "images/report.jpg").write_bytes(b"synthetic fixture")
+    write(tmp_path / "coverage_report.json", bad)
+    report = validate_dataset(tmp_path)
+    assert not report["passed"] and any("coverage_report.json" in error for error in report["failures"])
+    assert not read(tmp_path / "validation_report.json")["passed"]
+
+
+@pytest.mark.parametrize("field,invalid", [
+    ("schema_version", 2.0), ("min_loinc_coverage", False), ("min_loinc_coverage", -1),
+])
+def test_rejects_invalid_numeric_metadata(tmp_path, clean, field, invalid):
+    root = tmp_path / "run"
+    shutil.copytree(clean, root)
+    path = root / "metadata.json"
+    metadata = read(path)
+    metadata[field] = invalid
+    write(path, metadata)
+    with pytest.raises(ValueError, match="schema version|minimum coverage"):
+        check_run(root, DATA, 0)
+
+
+@pytest.mark.parametrize("field", ["total_reports", "failures", "loinc_counts", "profiles"])
+def test_rejects_booleans_equivalent_to_recorded_counts(tmp_path, clean, field):
+    root = tmp_path / "run"
+    shutil.copytree(clean, root)
+    path = root / "coverage_report.json"
+    coverage = read(path)
+    if isinstance(coverage[field], dict):
+        code = next(k for k, n in coverage[field].items() if n in (0, 1))
+        coverage[field][code] = bool(coverage[field][code])
+    else:
+        coverage[field] = bool(coverage[field])
+    write(path, coverage)
+    with pytest.raises(ValueError, match=field):
+        check_run(root, DATA, 0)
+
+
+def test_negative_coverage_has_a_cli_error_message(clean, capsys):
+    from scripts.validate_synthetic_dataset import main
+    assert main(["--dataset", str(clean), "--min-loinc", "-1"]) == 1
+    assert "negative" in capsys.readouterr().err

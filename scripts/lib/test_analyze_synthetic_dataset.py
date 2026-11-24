@@ -87,6 +87,8 @@ def test_measures_zero_and_rare_separately(tmp_path):
     "change",
     [
         "tamper_label",
+        "nonfinite_visible_json",
+        "non_utf8_visible_json",
         "forged_count",
         "unrecorded_code",
         "path_escape",
@@ -107,6 +109,14 @@ def test_corruption_is_detected_without_publishing_html(tmp_path, change):
     coverage = json.loads(coverage_path.read_text())
     if change == "tamper_label":
         source.write_text(source.read_text() + " ")
+    if change in ("nonfinite_visible_json", "non_utf8_visible_json"):
+        target = json.loads(source.read_text())
+        if change == "nonfinite_visible_json":
+            target["results"][0]["value"] = float("nan")
+            write_json(source, target)
+        else:
+            source.write_text(json.dumps(target), encoding="utf-16")
+        records[0]["sha256"][label] = hashlib.sha256(source.read_bytes()).hexdigest()
     if change == "forged_count":
         coverage["loinc_counts"]["718-7"] = 3
     if change == "unrecorded_code":

@@ -187,6 +187,20 @@ class TestSFTFormat:
 class TestDPOFormat:
     """Test DPO JSONL output format."""
 
+    def test_invalid_rejection_can_be_fixed_without_duplicating_other_formats(
+        self, writer: GroundTruthWriter, output_dir: Path, sample_gt: dict,
+    ) -> None:
+        with writer:
+            with pytest.raises(TypeError):
+                writer.write_examples("images/report.jpg", sample_gt, 3, sft=True,
+                                      dpo_rejected={"results": [set()]}, grpo=True)
+            assert writer.stats()["total"] == 0
+            assert not list(output_dir.glob("*.jsonl"))
+            writer.write_examples("images/report.jpg", sample_gt, 3, sft=True,
+                                  dpo_rejected={"results": []}, grpo=True)
+        for kind in ("sft", "dpo", "grpo"):
+            assert len((output_dir / f"{kind}_train.jsonl").read_text().splitlines()) == 1
+
     def test_write_3_dpo_examples(
         self, writer: GroundTruthWriter, output_dir: Path, sample_gt: dict
     ) -> None:
@@ -370,40 +384,40 @@ class TestPromptRotation:
 class TestDPORejectedGeneration:
     """Test generate_dpo_rejected produces different output."""
 
-    def test_rejected_differs_from_original(self, sample_gt: dict) -> None:
+    def test_rejected_differs_from_original(self, tmp_path: Path, sample_gt: dict) -> None:
         """Rejected output must differ from the original ground truth."""
-        writer = GroundTruthWriter(Path("/tmp/unused"))
+        writer = GroundTruthWriter(tmp_path)
         rng = random.Random(42)
         rejected = writer.generate_dpo_rejected(sample_gt, rng)
         assert rejected != sample_gt
 
-    def test_rejected_preserves_results_key(self, sample_gt: dict) -> None:
+    def test_rejected_preserves_results_key(self, tmp_path: Path, sample_gt: dict) -> None:
         """Rejected output still has a 'results' key."""
-        writer = GroundTruthWriter(Path("/tmp/unused"))
+        writer = GroundTruthWriter(tmp_path)
         rng = random.Random(42)
         rejected = writer.generate_dpo_rejected(sample_gt, rng)
         assert "results" in rejected
 
-    def test_rejected_is_valid_json_serializable(self, sample_gt: dict) -> None:
+    def test_rejected_is_valid_json_serializable(self, tmp_path: Path, sample_gt: dict) -> None:
         """Rejected output can be serialized to JSON."""
-        writer = GroundTruthWriter(Path("/tmp/unused"))
+        writer = GroundTruthWriter(tmp_path)
         rng = random.Random(42)
         rejected = writer.generate_dpo_rejected(sample_gt, rng)
         serialized = json.dumps(rejected, ensure_ascii=False)
         reparsed = json.loads(serialized)
         assert reparsed == rejected
 
-    def test_rejected_does_not_mutate_original(self, sample_gt: dict) -> None:
+    def test_rejected_does_not_mutate_original(self, tmp_path: Path, sample_gt: dict) -> None:
         """Original ground truth must not be modified."""
         original_copy = json.loads(json.dumps(sample_gt))
-        writer = GroundTruthWriter(Path("/tmp/unused"))
+        writer = GroundTruthWriter(tmp_path)
         rng = random.Random(42)
         _ = writer.generate_dpo_rejected(sample_gt, rng)
         assert sample_gt == original_copy
 
-    def test_multiple_rejections_vary(self, sample_gt: dict) -> None:
+    def test_multiple_rejections_vary(self, tmp_path: Path, sample_gt: dict) -> None:
         """Different seeds should produce different rejected variants."""
-        writer = GroundTruthWriter(Path("/tmp/unused"))
+        writer = GroundTruthWriter(tmp_path)
         rejections = set()
         for seed in range(20):
             rng = random.Random(seed)
@@ -412,17 +426,17 @@ class TestDPORejectedGeneration:
         # With 20 different seeds we should get at least a few different variants
         assert len(rejections) >= 3
 
-    def test_rejected_with_empty_results(self) -> None:
+    def test_rejected_with_empty_results(self, tmp_path: Path) -> None:
         """Empty results list should return unchanged."""
-        writer = GroundTruthWriter(Path("/tmp/unused"))
+        writer = GroundTruthWriter(tmp_path)
         rng = random.Random(42)
         gt = {"results": []}
         rejected = writer.generate_dpo_rejected(gt, rng)
         assert rejected == gt
 
-    def test_rejected_with_single_result(self) -> None:
+    def test_rejected_with_single_result(self, tmp_path: Path) -> None:
         """Single result: errors still apply but drop cannot remove all."""
-        writer = GroundTruthWriter(Path("/tmp/unused"))
+        writer = GroundTruthWriter(tmp_path)
         gt = {"results": [{"test_name": "Glucosa", "value": "95", "unit": "mg/dL", "reference_range": "70 - 110", "flag": None, "loinc": "2345-7"}]}
         # Run many times to exercise different error paths
         for seed in range(50):
@@ -533,6 +547,92 @@ class TestSplitDataset:
 
         with pytest.raises(ValueError, match="non-negative"):
             split_dataset(source, output_dir / "out", train_ratio=-0.1)
+
+    @pytest.mark.parametrize("kind", ["symlink", "hardlink", "fifo"])
+    def test_split_preserves_linked_and_special_destinations(self, tmp_path, kind):
+        import os
+
+        source = tmp_path / "source.jsonl"
+        source.write_bytes(b"new input\n")
+        target = tmp_path / "sft_val.jsonl"
+        external = tmp_path / "external.jsonl"
+        external.write_bytes(b"original\n")
+        if kind == "symlink":
+            try:
+                target.symlink_to(external)
+            except (NotImplementedError, OSError):
+                pytest.skip("Creating symlinks is unavailable")
+        elif kind == "hardlink":
+            target.hardlink_to(external)
+        elif hasattr(os, "mkfifo"):
+            os.mkfifo(target)
+        else:
+            pytest.skip("Creating FIFOs is unavailable")
+
+        before = target.lstat()
+        with pytest.raises(OSError, match="single-link regular file"):
+            split_dataset(source, tmp_path)
+        assert os.path.samestat(before, target.lstat())
+        assert external.read_bytes() == b"original\n"
+        assert not (tmp_path / "sft_train.jsonl").exists()
+
+    def test_split_restores_files_after_late_publication_failure(self, tmp_path, monkeypatch):
+        source = tmp_path / "input.jsonl"
+        source.write_bytes(b"new input\n")
+        train = tmp_path / "sft_train.jsonl"
+        train.write_bytes(b"previous train\n")
+        test = tmp_path / "sft_test.jsonl"
+        test.write_bytes(b"previous test\n")
+        replace = Path.replace
+
+        def fail_final_publication(path, target):
+            if path.name == "test" and target == test:
+                raise OSError("injected publication failure")
+            return replace(path, target)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "replace", fail_final_publication)
+            with pytest.raises(OSError, match="injected publication failure"):
+                split_dataset(source, tmp_path)
+        assert set(tmp_path.iterdir()) == {source, train, test}
+        assert train.read_bytes() == b"previous train\n"
+        assert test.read_bytes() == b"previous test\n"
+        assert split_dataset(source, tmp_path)["test"] == 1
+
+    def test_concurrent_rerun_cannot_interleave_split_publication(self, tmp_path, monkeypatch):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        first, second = tmp_path / "first", tmp_path / "second"
+        first.write_text("first\n" * 10)
+        second.write_text("second\n" * 10)
+        output = tmp_path / "splits"
+        published_train, resume = Event(), Event()
+        replace = Path.replace
+
+        def pause_during_publication(path, target):
+            result = replace(path, target)
+            if target == output / "sft_train.jsonl" and not published_train.is_set():
+                published_train.set()
+                assert resume.wait(5)
+            return result
+
+        monkeypatch.setattr(Path, "replace", pause_during_publication)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            active = pool.submit(split_dataset, first, output)
+            try:
+                assert published_train.wait(5)
+                with pytest.raises(FileExistsError, match="split staging directory"):
+                    split_dataset(second, output)
+            finally:
+                resume.set()
+            assert active.result()["train"] == 8
+
+        for path in output.iterdir():
+            assert set(path.read_text().splitlines()) == {"first"}
+        split_dataset(second, output)
+        for path in output.iterdir():
+            assert set(path.read_text().splitlines()) == {"second"}
 
     def test_split_small_dataset(self, output_dir: Path) -> None:
         """Splitting a very small dataset (3 items) should not crash."""
@@ -831,3 +931,29 @@ def test_split_dataset_preserves_source_if_it_is_also_a_target(tmp_path):
         split_dataset(source, tmp_path)
     assert source.read_bytes() == original
     assert list(tmp_path.iterdir()) == [source]
+
+
+def test_split_dataset_rolls_back_a_later_output_conflict(tmp_path):
+    source = tmp_path / "input.jsonl"
+    source.write_text('{"id": 1}\n{"id": 2}\n')
+    train = tmp_path / "sft_train.jsonl"
+    train.write_bytes(b"previous split\n")
+    (tmp_path / "sft_val.jsonl").mkdir()
+    with pytest.raises(OSError):
+        split_dataset(source, tmp_path, train_ratio=0.5)
+    assert train.read_bytes() == b"previous split\n"
+    assert not (tmp_path / "sft_test.jsonl").exists()
+
+
+def test_legacy_split_preserves_text_newlines_and_existing_file_mode(tmp_path):
+    import os
+
+    source = tmp_path / "input.jsonl"
+    source.write_bytes("  uno  \r\n\r  dos á\rúltimo".encode())
+    train = tmp_path / "sft_train.jsonl"
+    train.touch(mode=0o600)
+    counts = split_dataset(source, tmp_path, train_ratio=1, val_ratio=0, seed=42)
+    assert counts == {"train": 3, "val": 0, "test": 0}
+    assert train.read_bytes() == os.linesep.join(["  dos á", "  uno  ", "último", ""]).encode()
+    if os.name == "posix":
+        assert train.stat().st_mode & 0o777 == 0o600

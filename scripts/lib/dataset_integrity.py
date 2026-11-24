@@ -36,14 +36,24 @@ def json_lines(path):
             yield record
 
 
+def check_training_messages(kind, messages, image_count, *, optional_system=False):
+    roles = ["system", "user"] if kind == "grpo" else ["system", "user", "assistant"]
+    if optional_system and isinstance(messages, list) and len(messages) == len(roles) - 1:
+        roles = roles[1:]  # Older schema-v2 producers could omit the system turn.
+    if (not isinstance(messages, list) or len(messages) != len(roles)
+            or any(not isinstance(m, dict) or m.get("role") != role for m, role in zip(messages, roles))):
+        raise ValueError(f"{kind} message roles are invalid")
+    if any(not isinstance(m.get("content"), str) for m in messages):
+        raise ValueError(f"{kind} message content must be text")
+    if messages[roles.index("user")]["content"].count("<image>") != image_count:
+        raise ValueError(f"{kind} image token count differs from page count")
+
+
 def check_training_record(kind, row, images, truth):
     if row["images"] != images:
         raise ValueError(f"{kind} page references differ from the report manifest")
     messages = row["messages"]
-    if [m["role"] for m in messages] != (["system", "user"] if kind == "grpo" else ["system", "user", "assistant"]):
-        raise ValueError(f"{kind} message roles are invalid")
-    if messages[1]["content"].count("<image>") != len(images):
-        raise ValueError(f"{kind} image token count differs from page count")
+    check_training_messages(kind, messages, len(images))
     target = row["solution"] if kind == "grpo" else messages[-1]["content"]
     if decode_json(target) != truth:
         raise ValueError(f"{kind} target differs from the visible ground truth")
@@ -197,59 +207,68 @@ def _check_coordinate_pages(receipt, record, labels, pdf_sizes, image_sizes):
         raise ValueError("Coordinate rows do not cover every visible result")
 
 
-def _check_coordinate_pdf_text(path, pages, labels):
-    """Check the printed cell literals, including wrapped names, in vector coordinates."""
+def _check_coordinate_pdf_text(page, text, entry, labels):
+    """Assign the center of each printed glyph to one table cell on this page."""
     from bisect import bisect_right
     from unicodedata import normalize
-    import pypdfium2
     from pypdfium2 import raw
 
     def literal(value):
         # A narrow template can wrap even within a word.
         return "".join(normalize("NFC", value or "").split())
 
-    with closing(pypdfium2.PdfDocument(path)) as doc:
-        for index, entry in enumerate(pages):
-            rows = entry["rows"]
-            fields = _COORDINATE_FIELDS[:len(rows[0]["cells"])] if rows else ()
-            bottoms = [row["bbox"][3] for row in rows]
-            edges = [[row["cells"][field][2] for field in fields] for row in rows]
-            observed = [[[] for _ in fields] for _ in rows]
-            with closing(doc[index]) as page, closing(page.get_textpage()) as text:
-                height = page.get_height()
-                # PDFium's rectangle extraction includes partly intersecting
-                # glyphs, sometimes copying punctuation into the next cell.
-                # Assign each printed glyph once using the center of its ink.
-                for position in range(text.count_chars()):
-                    char = chr(raw.FPDFText_GetUnicode(text, position))
-                    if char.isspace() or char == "\x00":
-                        continue
-                    left, bottom, right, top = text.get_charbox(position)
-                    x, y = (left + right) / 2, height - (bottom + top) / 2
-                    r = bisect_right(bottoms, y)
-                    if r == len(rows) or y < rows[r]["bbox"][1] or x < rows[r]["bbox"][0]:
-                        continue
-                    c = bisect_right(edges[r], x)
-                    if c < len(fields):
-                        observed[r][c].append(char)
-            for row, observed_cells in zip(rows, observed):
-                label = labels[row["result_index"]]
-                for field, chars in zip(fields, observed_cells):
-                    if literal("".join(chars)) != literal(label.get(field)):
-                        raise ValueError(f"Coordinate {field} cell disagrees with PDF text on page {index + 1}")
+    rows = entry["rows"]
+    if not rows:
+        return
+    fields = _COORDINATE_FIELDS[:len(rows[0]["cells"])]
+    bottoms = [row["bbox"][3] for row in rows]
+    edges = [[row["cells"][field][2] for field in fields] for row in rows]
+    observed = [[[] for _ in fields] for _ in rows]
+    height = page.get_height()
+    # A bounded-text query can copy partly intersecting glyphs to neighboring
+    # cells. Use PDFium's tight ink boxes and its own character-index space.
+    for position in range(text.count_chars()):
+        char = chr(raw.FPDFText_GetUnicode(text.raw, position))
+        if char.isspace() or char == "\x00":
+            continue
+        left, bottom, right, top = text.get_charbox(position)
+        x, y = (left + right) / 2, height - (bottom + top) / 2
+        r = bisect_right(bottoms, y)
+        if r == len(rows) or y < rows[r]["bbox"][1] or x < rows[r]["bbox"][0]:
+            continue
+        c = bisect_right(edges[r], x)
+        if c < len(fields):
+            observed[r][c].append(char)
+    for row, observed_cells in zip(rows, observed):
+        label = labels[row["result_index"]]
+        for field, chars in zip(fields, observed_cells):
+            if literal("".join(chars)) != literal(label.get(field)):
+                raise ValueError(f"Coordinate {field} cell disagrees with PDF text on page {entry['page']}")
+
+
+def _checked_json(path, relative, digests):
+    """Check the manifest hash and decode the same UTF-8 bytes."""
+    data = (path / relative).read_bytes()
+    if hashlib.sha256(data).hexdigest() != digests[relative]:
+        raise ValueError(f"File digest differs for {relative}")
+    return decode_json(data.decode("utf-8"))
 
 
 def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = False):
     import pypdfium2
     from PIL import Image
+    from .dataset_output import file_sha256
     from .report_composer import ReportComposer, _VETERINARY_KEYWORDS
     from .terminology import CATALOG_PATH, admitted_range, load_terms
     from .value_generator import ERRONEOUS_PLASMA_TERMS, NONACTIVE_283_ADDITIONS, PROJECT_RANGE_SOURCES, UNSUPPORTED_REPORTING_METHODS
 
     meta = read_json(root / "metadata.json")
     count, fmt = meta["count"], meta["format"]
-    if meta["schema_version"] != 2 or type(count) is not int or count <= 0 or fmt not in {"jpg", "pdf", "both"}:
+    if type(meta["schema_version"]) is not int or meta["schema_version"] != 2 or type(count) is not int or count <= 0 or fmt not in {"jpg", "pdf", "both"}:
         raise ValueError("Invalid schema version, report count or format")
+    recorded_minimum = meta["min_loinc_coverage"]
+    if type(recorded_minimum) is not int or recorded_minimum < 0:
+        raise ValueError("Invalid minimum coverage in metadata")
     policy_keys = {"dpi", "reference_policy", "numeric_vocabulary", "profile_kind"}
     modern = bool(policy_keys.intersection(meta))
     if modern and (not policy_keys.issubset(meta) or meta["reference_policy"] not in {"omitted", "simulated"}
@@ -334,14 +353,14 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
         raise ValueError("Invalid generator source inventory")
     current_value_source = GENERATOR_SOURCES["scripts/lib/value_generator.py"]
     if (modern and revision < 4 and
-            hashlib.sha256(current_value_source.read_bytes()).hexdigest() == sources["scripts/lib/value_generator.py"]):
+            file_sha256(current_value_source) == sources["scripts/lib/value_generator.py"]):
         raise ValueError("Current generator source requires simulation revision 4")
     if verify_source:
         for name, path in GENERATOR_SOURCES.items():
-            if hashlib.sha256(path.read_bytes()).hexdigest() != sources[name]:
+            if file_sha256(path) != sources[name]:
                 raise ValueError(f"Generator source differs for {name}")
     for key, path in input_paths.items():
-        if hashlib.sha256(Path(path).read_bytes()).hexdigest() != meta["input_sha256"].get(key):
+        if file_sha256(Path(path)) != meta["input_sha256"].get(key):
             raise ValueError(f"Generation input digest differs for {key}")
     streams = {}
     for kind in ("sft", "dpo", "grpo"):
@@ -382,14 +401,15 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                 raise ValueError("Invalid result_count")
             if ("reference_policy" in rec) != modern or (modern and rec["reference_policy"] != reference_policy):
                 raise ValueError("Manifest reference policy disagrees with metadata")
-            images = []
-            if fmt in ("jpg", "both"):
-                for index in range(1, pages + 1):
-                    suffix = "" if index == 1 else f"_p{index:03d}"
-                    images.append(f"images/{report_id}{suffix}.jpg")
-            pdf = f"pdfs/{report_id}.pdf" if fmt in ("both", "pdf") else None
-            if rec["pdf"] != pdf or rec["images"] != images:
+            images = rec["images"]
+            pdf = f"pdfs/{report_id}.pdf" if fmt != "jpg" else None
+            if (rec["pdf"] != pdf or not isinstance(images, list)
+                    or len(images) != (pages if fmt != "pdf" else 0)):
                 raise ValueError("Unexpected PDF or page-image paths")
+            for index, path in enumerate(images, 1):
+                suffix = "" if index == 1 else f"_p{index:03d}"
+                if path != f"images/{report_id}{suffix}.jpg":
+                    raise ValueError("Unexpected PDF or page-image paths")
             coordinate_path = f"coordinates/{report_id}.json"
             if coordinates:
                 if rec.get("coordinates") != coordinate_path or (root / coordinate_path).is_symlink():
@@ -402,22 +422,9 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                         raise ValueError("Coordinate artifact path leaves the dataset")
             elif "coordinates" in rec:
                 raise ValueError("Undeclared coordinates in manifest")
-            pdf_sizes, image_sizes = [], []
-            if pdf:
-                with closing(pypdfium2.PdfDocument(root / pdf)) as doc:
-                    if len(doc) != pages:
-                        raise ValueError("PDF page count disagrees with manifest")
-                    if modern:
-                        for index in range(pages):
-                            with closing(doc[index]) as page, closing(page.get_textpage()) as textpage:
-                                if coordinates:
-                                    pdf_sizes.append(page.get_size())
-                                text = textpage.get_text_bounded()
-                            if ("DOCUMENTO SINTÉTICO DE ENTRENAMIENTO" not in text or
-                                    ("INTERVALOS Y ALERTAS SIMULADOS" in text) != (reference_policy == "simulated")):
-                                raise ValueError(f"Incorrect synthetic training notice on PDF page {index + 1}")
+            image_sizes = []
             for image in images:
-                with Image.open(root / image) as page:
+                with closing(Image.open(root / image)) as page:
                     if page.format != "JPEG" or min(page.size) < 1:
                         raise ValueError(f"Invalid JPEG {image}")
                     if modern:
@@ -437,17 +444,15 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                 artifacts.append(coordinate_path)
             if set(rec["sha256"]) != set(artifacts):
                 raise ValueError("Digest inventory differs from expected files")
-            for relative in artifacts:
-                with (root / relative).open("rb") as file:
-                    digest = hashlib.file_digest(file, "sha256").hexdigest() if hasattr(hashlib, "file_digest") else hashlib.sha256(file.read()).hexdigest()
-                if digest != rec["sha256"][relative]:
+            for relative in images + ([pdf] if pdf else []):
+                if file_sha256(root / relative) != rec["sha256"][relative]:
                     raise ValueError(f"File digest differs for {relative}")
             targets = {}
             for field in ("ground_truth", "normalized_ground_truth"):
                 expected = f"{field}/{report_id}.json"
                 if rec[field] != expected:
                     raise ValueError(f"Unexpected {field} path")
-                target = read_json(root / expected)
+                target = _checked_json(root, expected, rec["sha256"])
                 results = target["results"]
                 if not isinstance(results, list) or not results or len(results) != rec["result_count"]:
                     raise ValueError(f"Invalid {field} result count")
@@ -475,12 +480,26 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                 raise ValueError("Visible and normalized analyte identities differ")
             check_projection(targets["ground_truth"][0]["results"], targets["normalized_ground_truth"][0]["results"],
                              rec["column_count"], rec["show_sections"], meta["european"], reference_policy, revision)
-            if coordinates:
-                receipt = read_json(root / coordinate_path)
-                labels = targets["ground_truth"][0]["results"]
-                _check_coordinate_pages(receipt, rec, labels, pdf_sizes, image_sizes)
-                if pdf:
-                    _check_coordinate_pdf_text(root / pdf, receipt["pages"], labels)
+            labels = targets["ground_truth"][0]["results"]
+            receipt = _checked_json(root, coordinate_path, rec["sha256"]) if coordinates else None
+            if pdf:
+                with closing(pypdfium2.PdfDocument(root / pdf)) as doc:
+                    if len(doc) != pages:
+                        raise ValueError("PDF page count disagrees with manifest")
+                    if coordinates:
+                        sizes = [doc.get_page_size(i) for i in range(pages)]
+                        _check_coordinate_pages(receipt, rec, labels, sizes, image_sizes)
+                    if modern:
+                        for index in range(pages):
+                            with closing(doc[index]) as page, closing(page.get_textpage()) as textpage:
+                                text = textpage.get_text_bounded()
+                                if ("DOCUMENTO SINTÉTICO DE ENTRENAMIENTO" not in text or
+                                        ("INTERVALOS Y ALERTAS SIMULADOS" in text) != (reference_policy == "simulated")):
+                                    raise ValueError(f"Incorrect synthetic training notice on PDF page {index + 1}")
+                                if coordinates:
+                                    _check_coordinate_pdf_text(page, textpage, receipt["pages"][index], labels)
+            elif coordinates:
+                _check_coordinate_pages(receipt, rec, labels, [], image_sizes)
             for kind, row in zip(streams, records[1:]):
                 check_training_record(kind, row, images, targets["ground_truth"][0])
             profiles[rec["profile"]] += 1
@@ -501,7 +520,7 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
         # types as well, so nested directories and dangling links cannot hide.
         if sum(1 for _ in coordinate_dir.iterdir()) != count:
             raise ValueError("Unexpected entries in coordinates directory")
-    minimum = max(minimum, meta["min_loinc_coverage"])
+    minimum = max(minimum, recorded_minimum)
     if any(code_counts[code] < minimum for code in eligible):
         raise ValueError(f"Minimum coverage of {minimum} not reached for every eligible code")
     coverage = read_json(root / "coverage_report.json")
@@ -513,7 +532,14 @@ def check_run(root: Path, data_dir: Path, minimum: int, verify_source: bool = Fa
                 "mean_loinc_count": round(sum(code_counts.values()) / len(eligible), 2),
                 "loinc_coverage_pct": round(100 * len(code_counts) / len(eligible), 2), "profiles": dict(profiles), "regions": dict(regions)}
     for field, value in expected.items():
-        if coverage.get(field) != value:
+        actual = coverage.get(field)
+        if isinstance(value, dict):
+            valid_type = isinstance(actual, dict) and all(type(n) is int for n in actual.values())
+        elif type(value) is int:
+            valid_type = type(actual) is int
+        else:
+            valid_type = type(actual) in (int, float)
+        if not valid_type or actual != value:
             raise ValueError(f"coverage_report.json disagrees with observed {field}")
     return {"passed": True, "reports": count, "pages": n_pages, "images": n_images,
             "results": sum(code_counts.values()), "unique_loincs": len(code_counts), "exports": list(streams)}

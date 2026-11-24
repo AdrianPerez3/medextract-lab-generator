@@ -468,10 +468,12 @@ def _corner_blur(
     k = max(3, int(corner_sigma * 6) | 1)
     blurred = cv2.GaussianBlur(image, (k, k), corner_sigma)
     for rows in _row_blocks(image):
-        alpha = np.clip(_squared_radius(x_squared, rows, cy, max_r), 0, 1)[..., None]
-        # GaussianBlur has already read the full image. Its tile can now
-        # receive the blended result without shifting later blur boundaries.
-        blurred[rows] = image[rows] * (1.0 - alpha) + blurred[rows] * alpha
+        alpha = np.clip(_squared_radius(x_squared, rows, cy, max_r), 0, 1)
+        sharp_weight = 1.0 - alpha
+        # One channel at a time keeps the floating-point buffers tile-sized.
+        for channel in range(3):
+            plane = blurred[rows, :, channel]
+            plane[:] = image[rows, :, channel] * sharp_weight + plane * alpha
     return blurred
 
 
@@ -518,7 +520,8 @@ def _vignette(
     result = np.empty_like(image)
     for rows in _row_blocks(image):
         mask = np.clip(1.0 - strength * _squared_radius(x_squared, rows, cy, max_r), 0, 1)
-        result[rows] = image[rows] * mask[..., None]
+        for channel in range(3):
+            result[rows, :, channel] = image[rows, :, channel] * mask
     return result
 
 
@@ -544,27 +547,6 @@ def _gaussian_noise(
             noise += tile
         result[rows] = np.clip(noise, 0, 255, out=noise)
     return result
-
-
-def _salt_pepper_noise(
-    image: np.ndarray, amount: float, np_rng: np.random.RandomState
-) -> np.ndarray:
-    """Add salt-and-pepper noise.  *amount* is the fraction of pixels affected."""
-    out = image.copy()
-    h, w = out.shape[:2]
-    num_pixels = int(amount * h * w)
-
-    # Salt (white pixels)
-    ys = np_rng.randint(0, h, num_pixels)
-    xs = np_rng.randint(0, w, num_pixels)
-    out[ys, xs] = 255
-
-    # Pepper (black pixels)
-    ys = np_rng.randint(0, h, num_pixels)
-    xs = np_rng.randint(0, w, num_pixels)
-    out[ys, xs] = 0
-
-    return out
 
 
 def _brightness_contrast(
@@ -622,44 +604,6 @@ def _motion_blur(
 
     kernel /= kernel.sum()
     return cv2.filter2D(image, -1, kernel)
-
-
-def _paper_texture(
-    image: np.ndarray, intensity: float, np_rng: np.random.RandomState
-) -> np.ndarray:
-    """Overlay a subtle paper-like texture using multi-scale noise.
-
-    Combines two scales of smoothed noise to approximate Perlin-like
-    texture without requiring an external library.
-    """
-    h, w = image.shape[:2]
-
-    # Coarse noise (low frequency)
-    small_h, small_w = max(h // 16, 1), max(w // 16, 1)
-    coarse = np_rng.normal(0, 1, (small_h, small_w)).astype(np.float32)
-    coarse = cv2.resize(coarse, (w, h), interpolation=cv2.INTER_LINEAR)
-    coarse = cv2.GaussianBlur(coarse, (15, 15), 0)
-
-    # Fine noise (higher frequency)
-    small_h2, small_w2 = max(h // 4, 1), max(w // 4, 1)
-    fine = np_rng.normal(0, 1, (small_h2, small_w2)).astype(np.float32)
-    fine = cv2.resize(fine, (w, h), interpolation=cv2.INTER_LINEAR)
-    fine = cv2.GaussianBlur(fine, (5, 5), 0)
-
-    # Combine scales
-    texture = 0.7 * coarse + 0.3 * fine
-
-    # Normalize to [-1, 1] range
-    t_min, t_max = texture.min(), texture.max()
-    if t_max - t_min > 1e-6:
-        texture = 2.0 * (texture - t_min) / (t_max - t_min) - 1.0
-    else:
-        texture[:] = 0.0
-
-    # Apply as multiplicative modulation
-    modulation = 1.0 + intensity * texture
-    result = image.astype(np.float32) * modulation[:, :, np.newaxis]
-    return np.clip(result, 0, 255).astype(np.uint8)
 
 
 def _finger_occlusion(image: np.ndarray, rng: random.Random) -> np.ndarray:
@@ -730,7 +674,8 @@ def _lighting_gradient(image: np.ndarray, rng: random.Random) -> np.ndarray:
     for rows in _row_blocks(image):
         # Form the original float64 product before reducing precision.
         mask = (ys[rows, None] * xs).astype(np.float32)
-        result[rows] = image[rows] * mask[..., None]
+        for channel in range(3):
+            result[rows, :, channel] = image[rows, :, channel] * mask
     return result
 
 

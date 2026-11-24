@@ -111,8 +111,8 @@ def _prepare_pages(sidecar, data, space):
             fields = _object(row.get("cells"), "cells")
             name = _box(fields.get("test_name"), "test_name", bounds)
             val = _box(fields.get("value"), "value", bounds)
-            if not (name[2] <= val[0] or val[2] <= name[0]):
-                raise ValueError("Name and value columns overlap")
+            if name[2] > val[0]:
+                raise ValueError("Expected disjoint name and value columns in reading order")
             cells.append((index, name, val))
             values.append(value)
         pages.append((cells, w, h, input_width, input_height))

@@ -1,8 +1,14 @@
-"""Publish generated datasets and splits without exposing partial outputs."""
+"""Hash dataset artifacts and publish completed output directories."""
 from contextlib import contextmanager
+import hashlib
 from pathlib import Path
 from stat import S_IMODE
 from tempfile import TemporaryDirectory
+
+
+def file_sha256(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 @contextmanager

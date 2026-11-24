@@ -141,6 +141,47 @@ def test_invalid_metadata_object_has_a_cli_error_without_traceback(tmp_path):
     assert not (tmp_path / "splits").exists()
 
 
+@pytest.mark.parametrize(("kind", "mutation", "reason"), [
+    ("sft", "role", "message roles"),
+    ("dpo", "marker", "image token count"),
+    ("grpo", "nontext", "message content"),
+    ("sft", "legacy-role", "message roles"),
+    ("sft", "utf16-label", "utf-8"),
+])
+def test_packager_checks_conversations_before_publishing(tmp_path, kind, mutation, reason):
+    import generate_complete_synthetic as generator
+
+    dataset = tmp_path / "data"
+    assert generator.main(["--count", "1", "--workers", "1", "--dpi", "72", "--format", "jpg",
+                           "--tiers", "1,0,0,0,0", "--output", str(dataset)]) == 0
+    stream = dataset / f"{kind}_train.jsonl"
+    row = json.loads(stream.read_bytes())
+    if mutation == "legacy-role":
+        metadata = dataset / "metadata.json"
+        meta = json.loads(metadata.read_text())
+        del meta["simulation_revision"], meta["reference_policy"]
+        metadata.write_text(json.dumps(meta))
+        row["messages"] = row["messages"][1:]
+        row["messages"][0]["role"] = "assistant"
+    elif mutation == "utf16-label":
+        manifest = dataset / "reports.jsonl"
+        report = json.loads(manifest.read_text())
+        label = dataset / report["ground_truth"]
+        label.write_bytes(label.read_text().encode("utf-16"))
+        report["sha256"][report["ground_truth"]] = hashlib.sha256(label.read_bytes()).hexdigest()
+        manifest.write_text(json.dumps(report) + "\n")
+    elif mutation == "role":
+        row["messages"][-1]["role"] = "user"
+    elif mutation == "marker":
+        row["messages"][1]["content"] += "<image>"
+    else:
+        row["messages"][1]["content"] = 7
+    stream.write_text(json.dumps(row) + "\n")
+    result = cli(dataset)
+    assert result.returncode == 1 and reason in result.stderr
+    assert not (dataset / "splits").exists()
+
+
 def test_legacy_shuffle_preserves_original_text_and_seed(tmp_path):
     import random
 
