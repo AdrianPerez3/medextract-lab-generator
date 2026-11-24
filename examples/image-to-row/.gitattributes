@@ -1,0 +1,2 @@
+# Tesseract ends structural TSV records with an empty text field.
+report.tsv text eol=lf whitespace=-blank-at-eol

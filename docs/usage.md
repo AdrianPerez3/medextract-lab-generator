@@ -66,7 +66,7 @@ To score an extraction, supply one point inside the printed test name and one in
 python scripts/score_row_associations.py --coordinates spatial-run/coordinates/RPT_000000.json --ground-truth spatial-run/ground_truth/RPT_000000.json --predictions predictions.json
 ```
 
-Both predictions pair the correct cells and match the printed values. The scorer credits two of 17 expected rows. If you exchange the two value points together with their text, both values still transcribe their selected cells correctly, but the scorer reports two wrong-row links and zero correct associations. For original clean JPEG pixel positions, add `--space image-pixels`.
+Both predictions pair the correct cells and match the printed values. The scorer credits two of 17 expected rows. If you exchange the two value points together with their text, both values still transcribe their selected cells correctly, but the scorer reports two wrong-row links and zero correct associations. For pixel positions from an unlabelled prediction file, add `--space image-pixels`. The [image-to-row example](../examples/image-to-row/README.md) declares its pixel space and original page dimensions in its output, so the scorer can use them directly. Scoring a single page of a multi-page report still counts all expected rows in the report.
 
 `association` measures correct test-to-value links. `association_and_exact_value` also requires a character-for-character match to the printed value. Precision divides distinct matched rows by all submitted predictions, and recall divides them by all expected rows. Duplicate submissions can earn a row credit only once. The score evaluates the supplied locations and value text. It does not run OCR or check the extracted test-name spelling.
 

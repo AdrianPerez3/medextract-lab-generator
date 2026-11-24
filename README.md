@@ -20,6 +20,17 @@ In the first row of the sample, the printed name is `Leucocitos` and the result 
 
 Para evaluar el OCR de informes de laboratorio en español, compara la coma decimal y la unidad con el texto impreso. Usa las coordenadas de las celdas para comprobar que cada resultado corresponde a la prueba correcta.
 
+## Extract rows from a page image
+
+Run the row extractor on the sample report's saved Tesseract words. Replay works offline with Python 3.11 and the files in this repository.
+
+```sh
+python scripts/extract_ocr_rows.py --tsv examples/image-to-row/report.tsv --report-id RPT_000000 > predictions.json
+python scripts/score_row_associations.py --coordinates examples/image-to-row/coordinates.json --ground-truth examples/visible.json --predictions predictions.json
+```
+
+For fresh OCR with Tesseract installed, replace `--tsv examples/image-to-row/report.tsv` with `--image examples/report.jpg`. The output includes each proposed result's literal text and the pixel locations of its test and value. The worked example shows how exchanging two accurately read numbers changes the score. [Image-to-row example, setup and limitations](examples/image-to-row/README.md)
+
 ## Generate your first reports
 
 Run these commands from the repository root with Python 3.11. The generator creates `demo-run` if needed and accepts an existing empty directory.
