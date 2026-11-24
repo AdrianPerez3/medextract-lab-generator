@@ -40,6 +40,7 @@ The command uses clean images (tier 0) at 144 DPI. Row and cell bounds are recor
 
 | If you want to… | Start here |
 |---|---|
+| Compare PaddleOCR, Tesseract and decimal-mark review on 80 synthetic reports | [OCR punctuation study, data and scoring instructions](docs/benchmarks/ocr-punctuation.md) |
 | Check whether an extractor attached each value to the correct test | [Generate row and cell coordinates](docs/usage.md#check-which-test-a-value-belongs-to) |
 | Plot code coverage, change the output format, simulate a camera capture or split training data | [Usage guide](docs/usage.md) |
 | Trace how rows become pages and labels | [Generator entry point](generate_complete_synthetic.py) and [implementation and tests](scripts/lib/) |
