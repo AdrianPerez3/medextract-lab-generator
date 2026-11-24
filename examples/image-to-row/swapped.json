@@ -1,0 +1,11 @@
+{
+  "report_id": "RPT_000000",
+  "space": "image-pixels",
+  "page": 1,
+  "width": 1191,
+  "height": 1684,
+  "predictions": [
+    {"page": 1, "test_point": [110.5, 295], "value_point": [587.5, 319], "value_text": "4,87"},
+    {"page": 1, "test_point": [106.5, 318], "value_point": [588, 296], "value_text": "6,79"}
+  ]
+}

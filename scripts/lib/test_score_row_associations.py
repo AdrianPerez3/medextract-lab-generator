@@ -290,3 +290,31 @@ def test_cli_round_trip_and_digest_mismatch(tmp_path):
     labels.write_bytes(v + b"\n")
     bad = subprocess.run(cmd, capture_output=True, text=True)
     assert bad.returncode != 0 and "SHA-256" in bad.stderr and bad.stdout == ""
+
+
+def test_declared_pixel_space_and_dimensions_score_the_original_page():
+    coordinates, visible = fixture()
+    item = pred(0, 0, "12", page=2)
+    item.update(test_point=[43, 53], value_point=[132, 53])
+    doc = {
+        "space": "image-pixels",
+        "page": 2,
+        "width": 220,
+        "height": 262,
+        "predictions": [item],
+    }
+    result = score(coordinates, visible, doc)
+    assert result["space"] == "image-pixels"
+    assert result["association_and_exact_value"]["matched_rows"] == 1
+    with pytest.raises(ValueError, match="conflicts"):
+        score(coordinates, visible, doc, space="pdf-points")
+    with pytest.raises(ValueError, match="dimensions"):
+        score(coordinates, visible, {**doc, "width": 110})
+    with pytest.raises(ValueError, match="page"):
+        score(coordinates, visible, {**doc, "page": 3})
+    with pytest.raises(ValueError, match="page"):
+        score(coordinates, visible, {**doc, "page": 1})
+
+
+def test_legacy_undeclared_space_still_defaults_to_pdf_points():
+    assert run([pred(24, 24)])["space"] == "pdf-points"

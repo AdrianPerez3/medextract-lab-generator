@@ -169,12 +169,40 @@ def _metrics(matched, total, submitted):
     }
 
 
-def score(coordinates, visible_bytes, predictions, space="pdf-points"):
+def _check_source_image(predictions, pages):
+    """Check page metadata from a single-image extractor against the clean sidecar."""
+    if not any(key in predictions for key in ("width", "height")):
+        return None
+    page = _integer(predictions.get("page"), "source image page", 1)
+    if page > len(pages):
+        raise ValueError("Source image page is missing from the coordinate sidecar")
+    width = _integer(predictions.get("width"), "source image width", 1)
+    height = _integer(predictions.get("height"), "source image height", 1)
+    if (width, height) != pages[page - 1][-2:]:
+        raise ValueError(
+            "Source image dimensions differ from the clean coordinate sidecar"
+        )
+    return page
+
+
+def score(coordinates, visible_bytes, predictions, space=None):
     """Award one credit per expected row. Every submitted pair counts for precision."""
+    _object(predictions, "prediction document")
+    declared_space = predictions.get("space")
+    if space is None:
+        space = predictions.get("space", "pdf-points")
+    elif "space" in predictions and space != declared_space:
+        raise ValueError(
+            "Requested coordinate space conflicts with the prediction document"
+        )
     pages, values = _prepare_pages(
         _object(coordinates, "coordinates"), visible_bytes, space
     )
-    _object(predictions, "prediction document")
+    source_page = (
+        _check_source_image(predictions, pages)
+        if declared_space == "image-pixels"
+        else None
+    )
     report_id = coordinates["report_id"]
     if "report_id" in predictions and predictions["report_id"] != report_id:
         raise ValueError("Prediction report_id does not match coordinates")
@@ -196,6 +224,10 @@ def score(coordinates, visible_bytes, predictions, space="pdf-points"):
     text_at_value = text_for_test = 0
     for item in items:
         test_row, value_row, location = locate_prediction(pages, item)
+        if source_page is not None and item["page"] != source_page:
+            raise ValueError(
+                "Prediction page differs from its declared source image page"
+            )
         text = item["value_text"]
         geometry[location] += 1
         if test_row is not None:
@@ -250,7 +282,9 @@ def main():
         help="Predicted point pairs and visible values",
     )
     parser.add_argument(
-        "--space", choices=("pdf-points", "image-pixels"), default="pdf-points"
+        "--space",
+        choices=("pdf-points", "image-pixels"),
+        help="Override for unlabelled predictions (default: declared space or pdf-points)",
     )
     args = parser.parse_args()
     try:
