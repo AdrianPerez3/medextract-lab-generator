@@ -37,6 +37,7 @@ SOURCE_FILES = (
     "scripts/lib/dataset_output.py",
     "scripts/lib/degradation_engine.py",
     "scripts/lib/ground_truth_writer.py",
+    "scripts/lib/jsonl_split.py",
     "scripts/lib/report_composer.py",
     "scripts/lib/synonym_engine.py",
     "scripts/lib/template_engine.py",

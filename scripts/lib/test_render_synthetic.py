@@ -1,4 +1,6 @@
 """Read the generated PDF and JPEGs to check the evidence supplied to training."""
+import hashlib
+import json
 import random
 
 import cv2
@@ -10,6 +12,21 @@ import generate_complete_synthetic as generator
 from scripts.lib.degradation_engine import DegradationEngine
 from scripts.lib.report_composer import ReportContent, ReportTest
 from scripts.lib.template_engine import _cols_3, _cols_4, _cols_5, _cols_6
+
+
+@pytest.mark.parametrize("options", [{"indent": 2}, {"separators": (",", ":"), "allow_nan": False}])
+def test_json_artifact_hashes_original_text_format_and_refuses_overwrite(tmp_path, options):
+    payload = {"result": ["µg/dL", "α\nβ", 1.5]}
+    reference = tmp_path / "reference.json"
+    with reference.open("x", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=False, **options)
+
+    path = tmp_path / "artifact.json"
+    expected = reference.read_bytes()
+    assert generator._write_json_artifact(path, payload, **options) == hashlib.sha256(expected).hexdigest()
+    with pytest.raises(FileExistsError):
+        generator._write_json_artifact(path, {"replacement": True}, **options)
+    assert path.read_bytes() == expected
 
 
 def clinical_fixture():

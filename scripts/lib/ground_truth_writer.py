@@ -9,7 +9,7 @@ Usage:
     writer.write_sft_example("RPT_000001", "images/RPT_000001.jpg", gt, seed=0)
     writer.close()
 
-    split_dataset(Path("/output/sft_train.jsonl"), Path("/output"))
+    split_dataset(Path("/output/sft_train.jsonl"), Path("/output/splits"))
 """
 
 from __future__ import annotations
@@ -19,7 +19,11 @@ from contextlib import ExitStack
 import json
 import random
 from io import TextIOWrapper
+from itertools import islice
+import os
+from tempfile import TemporaryDirectory
 from pathlib import Path
+from stat import S_IMODE, S_ISREG
 from typing import Any
 
 
@@ -64,16 +68,16 @@ SYSTEM_PROMPT: str = (
 
 # Common LOINC swaps (similar tests that are easy to confuse)
 _LOINC_SWAPS: dict[str, str] = {
-    "2345-7": "2339-0",   # Glucose -> Glucose (urine)
-    "2160-0": "38483-4",  # Creatinine -> Creatinine (urine)
-    "1742-6": "1743-4",   # ALT -> ALT (no P5P)
-    "1920-8": "1916-6",   # AST -> AST (no P5P)
-    "2093-3": "2089-1",   # Cholesterol -> Cholesterol (calculated)
+    "2345-7": "2339-0",   # Serum/plasma glucose -> blood glucose
+    "2160-0": "38483-4",  # Serum/plasma creatinine -> blood creatinine
+    "1742-6": "1743-4",   # ALT, method unspecified -> ALT with P-5'-P
+    "1920-8": "1916-6",   # AST activity -> AST/ALT activity ratio
+    "2093-3": "2089-1",   # Total cholesterol -> LDL cholesterol, method unspecified
     "2571-8": "13457-7",  # Triglycerides -> LDL-C (calculated)
     "3016-3": "3024-7",   # TSH -> T4 free
     "718-7": "4544-3",    # Hemoglobin -> Hematocrit
-    "789-8": "26453-1",   # RBC -> Erythrocytes (body fluid)
-    "6690-2": "26464-8",  # WBC -> WBC (body fluid)
+    "789-8": "26453-1",   # Blood erythrocytes, automated count -> method unspecified
+    "6690-2": "26464-8",  # Blood leukocytes, automated count -> method unspecified
 }
 
 # Common unit confusions
@@ -112,13 +116,8 @@ class GroundTruthWriter:
         self.images_dir = self.output_dir / images_subdir
         self.images_dir.mkdir(parents=True, exist_ok=True)
 
-        self._sft_file: TextIOWrapper | None = None
-        self._dpo_file: TextIOWrapper | None = None
-        self._grpo_file: TextIOWrapper | None = None
-
-        self._sft_count: int = 0
-        self._dpo_count: int = 0
-        self._grpo_count: int = 0
+        self._streams: dict[str, TextIOWrapper] = {}
+        self._counts = {"sft": 0, "dpo": 0, "grpo": 0}
 
     @staticmethod
     def _image_prompt(image_path: str | list[str], seed: int) -> tuple[list[str], str]:
@@ -128,140 +127,58 @@ class GroundTruthWriter:
         prompt = PROMPT_VARIANTS[seed % len(PROMPT_VARIANTS)]
         return images, "<image>" * len(images) + prompt
 
-    # ------------------------------------------------------------------
-    # SFT
-    # ------------------------------------------------------------------
-
-    def write_sft_example(
+    def write_examples(
         self,
-        report_id: str,
         image_path: str | list[str],
         ground_truth: dict[str, Any],
         seed: int,
+        *,
+        sft: bool = False,
+        dpo_rejected: dict[str, Any] | None = None,
+        grpo: bool = False,
     ) -> None:
-        """Write one SFT training example in ms-swift conversation format.
-
-        The output record has the structure expected by ms-swift:
-        ``{"messages": [...], "images": ["images/RPT_000001.jpg"]}``
-
-        Args:
-            report_id: Unique report identifier (e.g. "RPT_000001").
-            image_path: Relative path to the image from output_dir.
-            ground_truth: Ground truth dict (typically ``{"results": [...]}``)
-            seed: Integer seed used to rotate prompt variants.
-        """
+        """Write the selected formats for one report, serializing the shared target once."""
+        if not sft and not grpo and dpo_rejected is None:
+            raise ValueError("Select at least one training export")
         images, prompt = self._image_prompt(image_path, seed)
+        chosen = json.dumps(ground_truth, ensure_ascii=False, separators=(",", ":"))
+        # Validate both payloads before appending to any export. A caller can
+        # correct a non-serializable rejection and retry the same report.
+        negative = None
+        if dpo_rejected is not None:
+            negative = json.dumps(dpo_rejected, ensure_ascii=False, separators=(",", ":"))
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}]
+        if sft or negative is not None:
+            conversation = [*messages, {"role": "assistant", "content": chosen}]
+            if sft:
+                self._write_record("sft", {"messages": conversation, "images": images})
+            if negative is not None:
+                self._write_record("dpo", {"messages": conversation, "rejected_response": negative, "images": images})
+        if grpo:
+            self._write_record("grpo", {"messages": messages, "images": images, "solution": chosen})
 
-        record: dict[str, Any] = {
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-                {
-                    "role": "assistant",
-                    "content": json.dumps(
-                        ground_truth, ensure_ascii=False, separators=(",", ":")
-                    ),
-                },
-            ],
-            "images": images,
-        }
+    def _write_record(self, kind: str, record: dict[str, Any]) -> None:
+        stream = self._streams.get(kind)
+        if stream is None:
+            stream = (self.output_dir / f"{kind}_train.jsonl").open("a", encoding="utf-8")
+            self._streams[kind] = stream
+        stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._counts[kind] += 1
 
-        self._ensure_sft_file()
-        assert self._sft_file is not None
-        self._sft_file.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._sft_count += 1
+    def write_sft_example(self, report_id: str, image_path: str | list[str],
+                          ground_truth: dict[str, Any], seed: int) -> None:
+        """Append a supervised conversation with the visible label as the assistant response."""
+        self.write_examples(image_path, ground_truth, seed, sft=True)
 
-    # ------------------------------------------------------------------
-    # DPO
-    # ------------------------------------------------------------------
+    def write_dpo_example(self, report_id: str, image_path: str | list[str],
+                          chosen_gt: dict[str, Any], rejected_gt: dict[str, Any], seed: int) -> None:
+        """Append the chosen conversation and its explicitly supplied negative response."""
+        self.write_examples(image_path, chosen_gt, seed, dpo_rejected=rejected_gt)
 
-    def write_dpo_example(
-        self,
-        report_id: str,
-        image_path: str | list[str],
-        chosen_gt: dict[str, Any],
-        rejected_gt: dict[str, Any],
-        seed: int,
-    ) -> None:
-        """Write one DPO preference pair.
-
-        The ``messages`` list contains the *chosen* response.  The
-        ``rejected_response`` key contains the stringified rejected JSON.
-
-        Args:
-            report_id: Unique report identifier.
-            image_path: Relative path to the image from output_dir.
-            chosen_gt: Correct ground truth (chosen response).
-            rejected_gt: Plausible-but-wrong variant (rejected response).
-            seed: Integer seed for prompt rotation.
-        """
-        images, prompt = self._image_prompt(image_path, seed)
-
-        record: dict[str, Any] = {
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-                {
-                    "role": "assistant",
-                    "content": json.dumps(
-                        chosen_gt, ensure_ascii=False, separators=(",", ":")
-                    ),
-                },
-            ],
-            "rejected_response": json.dumps(
-                rejected_gt, ensure_ascii=False, separators=(",", ":")
-            ),
-            "images": images,
-        }
-
-        self._ensure_dpo_file()
-        assert self._dpo_file is not None
-        self._dpo_file.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._dpo_count += 1
-
-    # ------------------------------------------------------------------
-    # GRPO
-    # ------------------------------------------------------------------
-
-    def write_grpo_prompt(
-        self,
-        report_id: str,
-        image_path: str | list[str],
-        ground_truth: dict[str, Any],
-        seed: int,
-    ) -> None:
-        """Write GRPO prompt-only format (no assistant response).
-
-        The output record contains ``messages`` with only system + user turns,
-        plus a ``solution`` key holding the ground truth for reward scoring.
-
-        Args:
-            report_id: Unique report identifier.
-            image_path: Relative path to the image from output_dir.
-            ground_truth: Ground truth dict for reward function scoring.
-            seed: Integer seed for prompt rotation.
-        """
-        images, prompt = self._image_prompt(image_path, seed)
-
-        record: dict[str, Any] = {
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            "images": images,
-            "solution": json.dumps(
-                ground_truth, ensure_ascii=False, separators=(",", ":")
-            ),
-        }
-
-        self._ensure_grpo_file()
-        assert self._grpo_file is not None
-        self._grpo_file.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._grpo_count += 1
-
-    # ------------------------------------------------------------------
-    # DPO rejection generation
-    # ------------------------------------------------------------------
+    def write_grpo_prompt(self, report_id: str, image_path: str | list[str],
+                          ground_truth: dict[str, Any], seed: int) -> None:
+        """Append the two-turn prompt and its separate solution."""
+        self.write_examples(image_path, ground_truth, seed, grpo=True)
 
     def generate_dpo_rejected(
         self,
@@ -433,16 +350,6 @@ class GroundTruthWriter:
         ]
         results.append(rng.choice(hallucinated_tests))
 
-    # ------------------------------------------------------------------
-    # Dataset splitting
-    # ------------------------------------------------------------------
-
-    # (class-level utility, but also available as module-level function)
-
-    # ------------------------------------------------------------------
-    # Stats
-    # ------------------------------------------------------------------
-
     def stats(self) -> dict[str, Any]:
         """Return write statistics.
 
@@ -450,10 +357,8 @@ class GroundTruthWriter:
             Dict with counts for each format and output file paths.
         """
         return {
-            "sft_count": self._sft_count,
-            "dpo_count": self._dpo_count,
-            "grpo_count": self._grpo_count,
-            "total": self._sft_count + self._dpo_count + self._grpo_count,
+            **{f"{kind}_count": count for kind, count in self._counts.items()},
+            "total": sum(self._counts.values()),
             "output_dir": str(self.output_dir),
             "images_dir": str(self.images_dir),
         }
@@ -465,10 +370,9 @@ class GroundTruthWriter:
     def close(self) -> None:
         """Flush and close all open file handles."""
         with ExitStack() as handles:
-            for stream in (self._sft_file, self._dpo_file, self._grpo_file):
-                if stream is not None:
-                    handles.callback(stream.close)
-            self._sft_file = self._dpo_file = self._grpo_file = None
+            for stream in self._streams.values():
+                handles.callback(stream.close)
+            self._streams.clear()
 
     def __enter__(self) -> GroundTruthWriter:
         return self
@@ -476,30 +380,7 @@ class GroundTruthWriter:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
-    def _ensure_sft_file(self) -> None:
-        if self._sft_file is None:
-            self._sft_file = open(
-                self.output_dir / "sft_train.jsonl", "a", encoding="utf-8"
-            )
-
-    def _ensure_dpo_file(self) -> None:
-        if self._dpo_file is None:
-            self._dpo_file = open(
-                self.output_dir / "dpo_train.jsonl", "a", encoding="utf-8"
-            )
-
-    def _ensure_grpo_file(self) -> None:
-        if self._grpo_file is None:
-            self._grpo_file = open(
-                self.output_dir / "grpo_train.jsonl", "a", encoding="utf-8"
-            )
-
-
-# ---------------------------------------------------------------------------
 # Module-level utilities
 # ---------------------------------------------------------------------------
 
@@ -528,7 +409,9 @@ def split_dataset(
     - ``output_dir/sft_test.jsonl``   (remainder, default 10%)
 
     Shuffles with a deterministic seed before splitting so that the split
-    is reproducible.
+    is reproducible. Concurrent writers to the same directory fail fast. An
+    interrupted process can leave .sft-split-staging with its staged files
+    and any originals moved aside during publication.
 
     Args:
         sft_path: Path to the source JSONL file.
@@ -554,38 +437,56 @@ def split_dataset(
 
     source = Path(sft_path)
     output_dir = Path(output_dir)
-    for name in ("sft_train.jsonl", "sft_val.jsonl", "sft_test.jsonl"):
-        target = output_dir / name
-        if target.exists() and target.samefile(source):
-            raise ValueError("Split output cannot overwrite its training source")
+    # Direct callers accept blank/empty streams and may replace existing splits.
+    # The packaging CLI separately validates JSON objects.
+    from .jsonl_split import check_source_unchanged, shuffled_rows
 
-    # Read all lines
-    with open(sft_path, "r", encoding="utf-8") as f:
-        lines = [line for line in f if line.strip()]
+    with source.open(encoding="utf-8", newline="") as stream, ExitStack() as cleanup:
+        original = os.fstat(stream.fileno())
+        output_dir.mkdir(parents=True, exist_ok=True)
+        # The fixed directory reserves the three sibling names across processes.
+        reservation = output_dir / ".sft-split-staging"
+        try:
+            reservation.mkdir(mode=0o700)
+        except FileExistsError as exc:
+            raise FileExistsError(
+                f"Cannot claim split staging directory (in use or left by an interrupted split): {reservation}"
+            ) from exc
+        cleanup.callback(reservation.rmdir)
+        staging = Path(cleanup.enter_context(TemporaryDirectory(dir=reservation)))
 
-    # Shuffle deterministically
-    rng = random.Random(seed)
-    rng.shuffle(lines)
+        previous_modes = {}
+        for split in ("train", "val", "test"):
+            target = output_dir / f"sft_{split}.jsonl"
+            try:
+                status = target.lstat()
+            except FileNotFoundError:
+                continue
+            if os.path.samestat(original, status):
+                raise ValueError("Split output cannot overwrite its training source")
+            if not S_ISREG(status.st_mode) or status.st_nlink != 1:
+                raise OSError(f"Split output must be a single-link regular file: {target}")
+            previous_modes[split] = S_IMODE(status.st_mode)
 
-    total = len(lines)
-    n_train = int(total * train_ratio)
-    n_val = int(total * val_ratio)
-    # Remainder goes to test
-    n_test = total - n_train - n_val
+        total, rows = shuffled_rows(stream, seed)
+        n_train, n_val = int(total * train_ratio), int(total * val_ratio)
+        counts = {"train": n_train, "val": n_val, "test": total - n_train - n_val}
+        for split, count in counts.items():
+            with (staging / split).open("xb") as target:
+                target.writelines(islice(rows, count))
+            if split in previous_modes:
+                (staging / split).chmod(previous_modes[split])
+        check_source_unchanged(source, original)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    splits = {
-        "sft_train.jsonl": lines[:n_train],
-        "sft_val.jsonl": lines[n_train : n_train + n_val],
-        "sft_test.jsonl": lines[n_train + n_val :],
-    }
-
-    for filename, split_lines in splits.items():
-        with open(output_dir / filename, "w", encoding="utf-8") as f:
-            for line in split_lines:
-                if not line.endswith("\n"):
-                    line += "\n"
-                f.write(line)
-
-    return {"train": n_train, "val": n_val, "test": n_test}
+        # Keep the old entries until every replacement succeeds.
+        with ExitStack() as rollback:
+            for split in counts:
+                target = output_dir / f"sft_{split}.jsonl"
+                if split in previous_modes:
+                    backup = staging / f"{split}.old"
+                    target.replace(backup)
+                    rollback.callback(backup.replace, target)
+                (staging / split).replace(target)
+                rollback.callback(target.unlink, missing_ok=True)
+            rollback.pop_all()
+    return counts

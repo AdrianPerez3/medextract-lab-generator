@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from typing import Optional
 
 import random
@@ -157,12 +158,29 @@ NONACTIVE_283_TERMS = ERRONEOUS_PLASMA_TERMS | NONACTIVE_283_ADDITIONS
 UNSUPPORTED_REPORTING_METHODS = frozenset({"5803-2", "5811-5", "71707-4"})
 
 
+# The correlation engine publishes these five percentages to hundredths.
+_AUTO_DIFFERENTIAL = ("770-8", "736-9", "5905-5", "713-8", "706-2")
+
+
+def _value_decimal_places(value: float) -> int:
+    magnitude = abs(value)
+    if magnitude >= 1000:
+        return 0
+    if magnitude >= 10:
+        return 1
+    if magnitude >= 1:
+        return 2
+    if magnitude >= 0.01:
+        return 3
+    return 4
+
+
 class ValueGenerator:
     """Generates simulated values for admitted LOINC observations.
 
     Loads reference ranges (plausibility bounds) and LOINC metadata to produce
     values appropriate for each test's scale type.  Supports quantitative (Qn),
-    semi-quantitative/titre (SemiQn), ordinal (Ord), and nominal (Nom) scales.
+    semi-quantitative/titre (SemiQn), and admitted binary ordinal (Ord) scales.
     """
 
     def __init__(self, ranges_path: str, metadata_path: str, *, include_heuristic_numerics: bool = True) -> None:
@@ -173,6 +191,9 @@ class ValueGenerator:
             ranges = json.load(f)
         self._terms = load_terms()
         self._ranges = {}
+        # Input ranges are fixed for this generator. Cache each numeric
+        # interval and its printed precision separately for the two locales.
+        self._numeric_references: dict[tuple[str, bool], tuple[float, float, str]] = {}
         binary_codes = load_simulation_policy()["binary_answer_lists"]
         for code, item in sorted(ranges.items()):
             term = self._terms.get(code)
@@ -251,6 +272,21 @@ class ValueGenerator:
             return ref_low, ref_high
         return None, None
 
+    def _numeric_reference(self, loinc: str, european: bool) -> tuple[float, float, str]:
+        key = (loinc, european)
+        reference = self._numeric_references.get(key)
+        if reference is None:
+            low, high = self.get_ref_range(loinc)
+            if low is None or high is None:
+                minimum, maximum = self.simulation_bounds(loinc)
+                if low is None:
+                    low = minimum + (maximum - minimum) * 0.30
+                if high is None:
+                    high = minimum + (maximum - minimum) * 0.70
+            reference = (low, high, self._format_ref_range(low, high, european))
+            self._numeric_references[key] = reference
+        return reference
+
     # ------------------------------------------------------------------
     # Primary generate method
     # ------------------------------------------------------------------
@@ -283,18 +319,14 @@ class ValueGenerator:
 
         scale = self.get_scale(loinc)
 
-        if scale in ("Ord",):
+        if scale == "Ord":
             return self._generate_ordinal(loinc, rng, european_format)
-
-        if scale in ("Nom", "Nar", "Doc"):
-            return self._generate_nominal(loinc, rng)
 
         if scale == "SemiQn":
             return self._generate_semiquantitative(
                 loinc, rng, abnormal_multiplier, european_format,
             )
 
-        # Default: Qn (or OrdQn, or unknown with numeric data)
         return self._generate_quantitative(
             loinc, rng, abnormal_multiplier, european_format,
         )
@@ -361,11 +393,7 @@ class ValueGenerator:
         mn = float(rr.get("min", 0))
         mx = float(rr.get("max", 10000))
 
-        ref_low, ref_high = self.get_ref_range(loinc)
-        if ref_low is None:
-            ref_low = mn + (mx - mn) * 0.30
-        if ref_high is None:
-            ref_high = mn + (mx - mn) * 0.70
+        ref_low, ref_high, ref_fmt = self._numeric_reference(loinc, european_format)
 
         # Pick extreme end — always outside the reference range
         if rng.random() < 0.5:
@@ -385,9 +413,12 @@ class ValueGenerator:
             value = mn * 0.01 if mn > 0 else 0.01
 
         unit = self.get_unit(loinc)
+        rounded = self._round_value(value)
+        if mn <= rounded <= mx:
+            formatted = self._format_number(value, european_format)
+        else:
+            value, formatted = self._fit_display_to_bounds(loinc, rounded, mn, mx, unit, european_format)
         flag = self._compute_flag(value, ref_low, ref_high)
-        formatted = self._format_number(value, european_format)
-        ref_fmt = self._format_ref_range(ref_low, ref_high, european_format)
 
         return GeneratedValue(
             value=value,
@@ -416,12 +447,7 @@ class ValueGenerator:
         mn = float(rr.get("min", 0))
         mx = float(rr.get("max", 10000))
         unit = self.get_unit(loinc)
-        ref_low, ref_high = self.get_ref_range(loinc)
-
-        if ref_low is None:
-            ref_low = mn + (mx - mn) * 0.30
-        if ref_high is None:
-            ref_high = mn + (mx - mn) * 0.70
+        ref_low, ref_high, ref_fmt = self._numeric_reference(loinc, european_format)
 
         midpoint = (ref_low + ref_high) / 2.0
         range_width = ref_high - ref_low
@@ -448,12 +474,12 @@ class ValueGenerator:
         # Clamp to plausibility
         value = max(mn, min(mx, value))
 
-        # Round appropriately
         value = self._round_value(value)
-
+        if mn <= value <= mx:
+            formatted = self._format_number(value, european_format)
+        else:
+            value, formatted = self._fit_display_to_bounds(loinc, value, mn, mx, unit, european_format)
         flag = self._compute_flag(value, ref_low, ref_high)
-        formatted = self._format_number(value, european_format)
-        ref_fmt = self._format_ref_range(ref_low, ref_high, european_format)
 
         return GeneratedValue(
             value=value,
@@ -564,8 +590,8 @@ class ValueGenerator:
         rr = self._ranges.get(loinc, {})
         answers = rr.get("answers", [])
 
-        if answers and len(answers) >= 2:
-            normal_answer = answers[1] if len(answers) > 1 else answers[0]
+        if len(answers) >= 2:
+            normal_answer = answers[1]
             abnormal_answer = answers[0]
         else:
             normal_answer = "Negativo"
@@ -594,88 +620,41 @@ class ValueGenerator:
         )
 
     # ------------------------------------------------------------------
-    # Internal: Nominal (Nom / Nar / Doc)
-    # ------------------------------------------------------------------
-
-    def _generate_nominal(
-        self,
-        loinc: str,
-        rng: random.Random,
-    ) -> GeneratedValue:
-        rr = self._ranges.get(loinc, {})
-        answers = rr.get("answers", [])
-
-        if answers:
-            chosen = rng.choice(answers)
-        else:
-            # Generic nominal values
-            component = self._terms[loinc]["names"]["en"][0]
-            chosen = f"{component}: Normal"
-
-        return GeneratedValue(
-            value=chosen,
-            value_formatted=chosen,
-            unit="",
-            ref_low=None,
-            ref_high=None,
-            ref_formatted="",
-            flag=None,
-            is_numeric=False,
-            scale_type="Nom",
-        )
-
-    # ------------------------------------------------------------------
     # Formatting helpers
     # ------------------------------------------------------------------
 
     @staticmethod
     def _round_value(value: float) -> float:
         """Round a value to an appropriate number of decimal places."""
-        absv = abs(value)
-        if absv >= 1000:
-            return round(value, 0)
-        if absv >= 100:
-            # 0 or 1 decimal depending on whether it looks clean
-            r1 = round(value, 1)
-            if r1 == round(value, 0):
-                return round(value, 0)
-            return r1
-        if absv >= 10:
-            return round(value, 1)
-        if absv >= 1:
-            return round(value, 2)
-        if absv >= 0.01:
-            return round(value, 3)
-        return round(value, 4)
+        return round(value, _value_decimal_places(value))
+
+    @staticmethod
+    def _fit_display_to_bounds(
+        loinc: str, rounded: float, minimum: float, maximum: float, unit: str, european: bool,
+    ) -> tuple[float, str]:
+        """Find the closest printable value when ordinary rounding crosses a bound."""
+        below = rounded < minimum
+        boundary = minimum if below else maximum
+        differential = unit == "%" and loinc in _AUTO_DIFFERENTIAL
+        places = 2 if differential else _value_decimal_places(boundary)
+        quantum = Decimal(1).scaleb(-places)
+        # Decimal rounding inward keeps an exactly representable endpoint even
+        # when its binary floating-point value falls just to one side of a tick.
+        candidate = float(Decimal(str(boundary)).quantize(
+            quantum, rounding=ROUND_CEILING if below else ROUND_FLOOR,
+        ))
+        if not minimum <= candidate <= maximum:
+            raise ValueError(f"No value for {loinc} fits [{minimum}, {maximum}] at the report's numeric precision")
+        if differential:
+            return candidate, ValueGenerator._format_number_dp(candidate, places, european)
+        return candidate, ValueGenerator._format_number(candidate, european)
 
     @staticmethod
     def _format_number(value: float, european: bool) -> str:
-        """Format a numeric value as a display string.
-
-        Args:
-            value: The numeric value.
-            european: If True, use comma as decimal separator and period
-                      as thousands separator.
-        """
-        absv = abs(value)
-
-        # Determine decimal places for formatting
-        if absv >= 1000:
+        """Format a numeric value, using decimal commas for European reports."""
+        decimals = _value_decimal_places(value)
+        if 100 <= abs(value) < 1000 and value == int(value):
             decimals = 0
-        elif absv >= 100:
-            # Check if integer
-            if value == int(value):
-                decimals = 0
-            else:
-                decimals = 1
-        elif absv >= 10:
-            decimals = 1
-        elif absv >= 1:
-            decimals = 2
-        elif absv >= 0.01:
-            decimals = 3
-        else:
-            decimals = 4
 
         formatted = f"{value:.{decimals}f}"
 

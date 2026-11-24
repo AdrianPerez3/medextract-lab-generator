@@ -25,7 +25,7 @@ from typing import Any, Protocol
 from scripts.lib.report_composer import ReportComposer, ReportContent, ReportTest, CoverageTracker
 from scripts.lib.template_engine import TemplateEngine
 from scripts.lib.ground_truth_writer import GroundTruthWriter
-from scripts.lib.dataset_output import staged_output
+from scripts.lib.dataset_output import file_sha256, staged_output
 
 
 # ---------------------------------------------------------------------------
@@ -97,10 +97,10 @@ def _wrap_cell(value: str, width: float, font_name: str, size: float) -> list[st
     from reportlab.lib.utils import simpleSplit
     from reportlab.pdfbase import pdfmetrics
 
-    font = pdfmetrics.getFont(font_name)
     # ReportLab can draw Greek through its Symbol fallback. Its final fallback
     # substitutes a square for unsupported characters, which would corrupt labels.
-    if any(ord(ch) > 127 for ch in value):
+    if not value.isascii():
+        font = pdfmetrics.getFont(font_name)
         for used_font, _ in pdfmetrics.unicode2T1(value, [font] + font.substitutionFonts):
             if used_font.fontName == "ZapfDingbats":
                 raise ValueError(f"Unsupported glyph in table cell {value!r}")
@@ -416,6 +416,18 @@ class RenderJob:
     coordinates: bool = False
 
 
+def _write_json_artifact(path: Path, payload: dict, **options) -> str:
+    """Write one report artifact exclusively and hash the exact bytes written."""
+    text = json.dumps(payload, ensure_ascii=False, **options)
+    # Match the text-mode newlines of datasets generated on this platform.
+    if os.linesep != "\n":
+        text = text.replace("\n", os.linesep)
+    data = text.encode("utf-8")
+    with path.open("xb") as stream:
+        stream.write(data)
+    return hashlib.sha256(data).hexdigest()
+
+
 def generate_one(job: RenderJob) -> dict[str, Any]:
     """Render a single composed report into the private staging directory."""
     report = job.report
@@ -450,13 +462,15 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
             raise ValueError("Report has no visible lab results")
         labels = f"ground_truth/{report_id}.json"
         normalized = f"normalized_ground_truth/{report_id}.json"
-        for filename, payload in ((labels, visible), (normalized, report.ground_truth)):
-            with (job.output / filename).open("x", encoding="utf-8") as stream:
-                json.dump(payload, stream, indent=2, ensure_ascii=False)
-        files = [labels, normalized, *image_paths]
-        if keep_pdf:
-            files.append(pdf_path.relative_to(job.output).as_posix())
-        digests = {name: _file_sha256(job.output / name) for name in files}
+        digests = {
+            labels: _write_json_artifact(job.output / labels, visible, indent=2),
+            normalized: _write_json_artifact(job.output / normalized, report.ground_truth, indent=2),
+        }
+        for name in image_paths:
+            digests[name] = file_sha256(job.output / name)
+        pdf_name = pdf_path.relative_to(job.output).as_posix() if keep_pdf else None
+        if pdf_name:
+            digests[pdf_name] = file_sha256(pdf_path)
         record = {
             "sha256": digests,
             "report_id": report_id,
@@ -467,7 +481,7 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
             "column_count": len(_table_columns(job.template)),
             "show_sections": bool(job.template.get("show_sections", True)),
             "images": image_paths,
-            "pdf": pdf_path.relative_to(job.output).as_posix() if keep_pdf else None,
+            "pdf": pdf_name,
             "ground_truth": labels,
             "normalized_ground_truth": normalized,
             "profile": report.profile_name,
@@ -480,10 +494,8 @@ def generate_one(job: RenderJob) -> dict[str, Any]:
                 "schema_version": 1, "report_id": report_id, "coordinate_space": "pdf_points_top_left",
                 "ground_truth_sha256": digests[labels], "pages": coordinate_pages,
             }
-            with (job.output / name).open("x", encoding="utf-8") as stream:
-                json.dump(sidecar, stream, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            digests[name] = _write_json_artifact(job.output / name, sidecar, separators=(",", ":"), allow_nan=False)
             record["coordinates"] = name
-            digests[name] = _file_sha256(job.output / name)
         return record
     except Exception as exc:
         raise RuntimeError(f"{report_id}: {exc}") from exc
@@ -544,14 +556,6 @@ def _rendered_reports(jobs, workers, *, render_images):
             yield item
 
 
-def _file_sha256(path: Path) -> str:
-    with path.open("rb") as stream:
-        digest = hashlib.sha256()
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _generate(args: argparse.Namespace, output: Path) -> None:
     composer = ReportComposer(str(args.data_dir), include_heuristic_numerics=args.include_heuristic_numerics)
     eligible = composer.eligible_loincs
@@ -567,8 +571,8 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
     for name in directories:
         (output / name).mkdir()
 
-    data_hashes = {name: _file_sha256(path) for name, path in composer.input_paths.items()}
-    source_hashes = {name: _file_sha256(path) for name, path in GENERATOR_SOURCES.items()}
+    data_hashes = {name: file_sha256(path) for name, path in composer.input_paths.items()}
+    source_hashes = {name: file_sha256(path) for name, path in GENERATOR_SOURCES.items()}
     loincs: Counter[str] = Counter()
     synonyms: set[str] = set()
     profiles: Counter[str] = Counter()
@@ -592,14 +596,9 @@ def _generate(args: argparse.Namespace, output: Path) -> None:
             n_pages += item["pages"]
             n_images += len(item["images"])
             if writer is not None:
-                report_id, images, seed = item["report_id"], item["images"], item["seed"]
-                if args.sft:
-                    writer.write_sft_example(report_id, images, gt, seed)
-                if args.dpo:
-                    rejected = writer.generate_dpo_rejected(gt, random.Random(seed))
-                    writer.write_dpo_example(report_id, images, gt, rejected, seed)
-                if args.grpo:
-                    writer.write_grpo_prompt(report_id, images, gt, seed)
+                seed = item["seed"]
+                negative = writer.generate_dpo_rejected(gt, random.Random(seed)) if args.dpo else None
+                writer.write_examples(item["images"], gt, seed, sft=args.sft, dpo_rejected=negative, grpo=args.grpo)
             manifest.write(json.dumps(item, ensure_ascii=False) + "\n")
             if index % max(1, args.count // 20) == 0 or index == args.count:
                 print(f"  [{index}/{args.count}]")

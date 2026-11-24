@@ -9,12 +9,16 @@ from pathlib import Path
 import re
 import sys
 
+if __package__:
+    from .lib.dataset_integrity import decode_json, read_json
+else:  # Direct invocation as python scripts/analyze_synthetic_dataset.py.
+    from lib.dataset_integrity import decode_json, read_json
+
 
 def read_object(path):
     if path.is_symlink():
         raise ValueError(f"Expected a regular dataset file: {path.name}")
-    with path.open(encoding="utf-8") as stream:
-        obj = json.load(stream)
+    obj = read_json(path)
     if not isinstance(obj, dict):
         raise ValueError(f"Expected a JSON object in {path.name}")
     return obj
@@ -63,7 +67,7 @@ def analyze(dataset, rare_at_most=5):
     with manifest.open(encoding="utf-8") as stream:
         for index, line in enumerate(stream):
             rid = f"RPT_{index:06d}"
-            row = json.loads(line)
+            row = decode_json(line)
             label = f"ground_truth/{rid}.json"
             if (
                 not isinstance(row, dict)
@@ -105,7 +109,7 @@ def analyze(dataset, rare_at_most=5):
                 or digests.get(label) != sha256(raw).hexdigest()
             ):
                 raise ValueError(f"{rid}: visible label SHA-256 mismatch")
-            target = json.loads(raw)
+            target = decode_json(raw.decode("utf-8"))
             results = target.get("results") if isinstance(target, dict) else None
             if not isinstance(results, list) or natural(
                 row.get("result_count"), f"{rid} result_count", 1

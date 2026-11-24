@@ -31,11 +31,9 @@ try:
         _jpeg_compress,
         _lighting_gradient,
         _motion_blur,
-        _paper_texture,
         _perspective_warp,
         _resolution_loss,
         _rotate,
-        _salt_pepper_noise,
         _shadow_overlay,
         _vignette,
     )
@@ -50,11 +48,9 @@ except ModuleNotFoundError:
         _jpeg_compress,
         _lighting_gradient,
         _motion_blur,
-        _paper_texture,
         _perspective_warp,
         _resolution_loss,
         _rotate,
-        _salt_pepper_noise,
         _shadow_overlay,
         _vignette,
     )
@@ -488,19 +484,6 @@ class TestGaussianNoise:
         assert result.min() >= 0
 
 
-class TestSaltPepperNoise:
-    def test_pixels_affected(self, small_image: np.ndarray) -> None:
-        np_rng = np.random.RandomState(42)
-        result = _salt_pepper_noise(small_image, amount=0.01, np_rng=np_rng)
-        diff = np.count_nonzero(result != small_image)
-        assert diff > 0
-
-    def test_output_valid(self, small_image: np.ndarray) -> None:
-        np_rng = np.random.RandomState(42)
-        result = _salt_pepper_noise(small_image, amount=0.05, np_rng=np_rng)
-        assert result.dtype == np.uint8
-
-
 class TestBrightnessContrast:
     def test_brightness_increase(self, small_image: np.ndarray) -> None:
         result = _brightness_contrast(small_image, contrast=1.0, brightness=50.0)
@@ -547,14 +530,6 @@ class TestMotionBlur:
         result = _motion_blur(small_image, kernel_size=7, rng=random.Random(42))
         assert result.shape == small_image.shape
         assert not np.array_equal(result, small_image)
-
-
-class TestPaperTexture:
-    def test_texture_added(self, small_image: np.ndarray) -> None:
-        np_rng = np.random.RandomState(42)
-        result = _paper_texture(small_image, intensity=0.1, np_rng=np_rng)
-        assert not np.array_equal(result, small_image)
-        assert result.dtype == np.uint8
 
 
 class TestFingerOcclusion:

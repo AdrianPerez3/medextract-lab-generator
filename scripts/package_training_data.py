@@ -19,15 +19,19 @@ import math
 import os
 import random
 import sys
-from array import array
+from itertools import islice
 from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 if __package__:
-    from .lib.dataset_output import staged_output
+    from .lib.dataset_integrity import check_training_messages, decode_json, json_lines, read_json
+    from .lib.dataset_output import file_sha256, staged_output
+    from .lib.jsonl_split import check_source_unchanged, shuffled_rows
 else:
-    from lib.dataset_output import staged_output
+    from lib.dataset_integrity import check_training_messages, decode_json, json_lines, read_json
+    from lib.dataset_output import file_sha256, staged_output
+    from lib.jsonl_split import check_source_unchanged, shuffled_rows
 
 
 # ---------------------------------------------------------------------------
@@ -59,10 +63,6 @@ def read_jsonl(filepath: Path) -> list[str]:
     return lines
 
 
-def _invalid_constant(value: str):
-    raise ValueError(f"Invalid JSON number: {value}")
-
-
 def validate_jsonl_lines(lines: list[str], source_name: str) -> list[str]:
     """Validate that every line is valid JSON.
 
@@ -76,7 +76,7 @@ def validate_jsonl_lines(lines: list[str], source_name: str) -> list[str]:
     errors: list[str] = []
     for i, line in enumerate(lines, start=1):
         try:
-            obj = json.loads(line, parse_constant=_invalid_constant)
+            obj = decode_json(line)
             if not isinstance(obj, dict):
                 raise ValueError("Expected a JSON object")
         except ValueError as exc:
@@ -153,13 +153,6 @@ def write_jsonl(filepath: Path, lines: list[str]) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _check_source_unchanged(path, original):
-    current = path.stat()
-    if (not os.path.samestat(original, current) or original.st_size != current.st_size
-            or original.st_mtime_ns != current.st_mtime_ns):
-        raise ValueError(f"Training source changed while packaging {path.name}")
-
-
 def _remove_created_file(path, created):
     try:
         if os.path.samestat(path.lstat(), created):
@@ -201,49 +194,32 @@ def split_jsonl_file(
     if source_path.resolve().parent == output_dir.resolve():
         raise ValueError("Split output cannot overwrite its training source")
 
-    # Keep byte boundaries and a permutation of nonempty row numbers. Payloads
-    # stay on disk, including for multi-gigabyte legacy training streams.
-    boundaries = array("Q", [0])
-    order = array("Q")
+    def validate(line, number):
+        try:
+            obj = decode_json(line)
+            if not isinstance(obj, dict):
+                raise ValueError("Expected a JSON object")
+        except ValueError as exc:
+            raise ValueError(f"{source_path.name}:{number}: {exc}") from exc
+
     split_stats = {}
-    newline = os.linesep.encode("ascii")
     with source_path.open(encoding="utf-8", newline="") as source, ExitStack() as rollback:
         original = os.fstat(source.fileno())
-        for number, line in enumerate(source, 1):
-            boundaries.append(boundaries[-1] + len(line.encode("utf-8")))
-            if not line.strip():
-                continue
-            try:
-                obj = json.loads(line, parse_constant=_invalid_constant)
-                if not isinstance(obj, dict):
-                    raise ValueError("Expected a JSON object")
-            except ValueError as exc:
-                raise ValueError(f"{source_path.name}:{number}: {exc}") from exc
-            order.append(number - 1)
-        total = len(order)
+        total, rows = shuffled_rows(source, seed, validate)
         if not total:
             raise ValueError(f"Empty training source: {source_path}")
-
-        random.Random(seed).shuffle(order)
         train_end = int(total * train_pct / 100)
         val_end = train_end + int(total * val_pct / 100)
-        # The text pass preserved LF, CR and CRLF, so byte offsets are valid on
-        # every platform. Reuse the same open file for the shuffled reads.
-        raw = source.buffer
         output_dir.mkdir(parents=True, exist_ok=True)
         for split, start, end in (("train", 0, train_end), ("val", train_end, val_end), ("test", val_end, total)):
             path = output_dir / f"{prefix}_{split}.jsonl"
             with path.open("xb") as target:
                 rollback.callback(_remove_created_file, path, os.fstat(target.fileno()))
-                for i in range(start, end):
-                    index = order[i]
-                    raw.seek(boundaries[index])
-                    data = raw.read(boundaries[index + 1] - boundaries[index])
-                    target.write(data.rstrip(b"\r\n") + newline)
+                target.writelines(islice(rows, end - start))
             size = path.stat().st_size
             split_stats[split] = {"lines": end - start, "file": path.name, "size_bytes": size,
                                   "size_kb": round(size / 1024, 1)}
-        _check_source_unchanged(source_path, original)
+        check_source_unchanged(source_path, original)
         rollback.pop_all()
 
     return {
@@ -263,18 +239,6 @@ def _json_digest(obj: Any) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _manifest_rows(path: Path):
-    with path.open(encoding="utf-8") as stream:
-        for number, line in enumerate(stream, 1):
-            try:
-                record = json.loads(line, parse_constant=_invalid_constant)
-            except ValueError as exc:
-                raise ValueError(f"{path.name}:{number}: invalid JSON") from exc
-            if not isinstance(record, dict):
-                raise ValueError(f"{path.name}:{number}: expected a report")
-            yield record
-
-
 def _v2_splits(dataset: Path, metadata: dict, train_pct: float, val_pct: float, seed: int):
     """Link shared page bytes or exact visible/normalized targets into indivisible groups."""
     parents = {}
@@ -292,7 +256,7 @@ def _v2_splits(dataset: Path, metadata: dict, train_pct: float, val_pct: float, 
         other = owners.setdefault(key, report)
         parents[root(report)] = root(other)
 
-    for index, manifest in enumerate(_manifest_rows(dataset / "reports.jsonl")):
+    for index, manifest in enumerate(json_lines(dataset / "reports.jsonl")):
         rid = f"RPT_{index:06d}"
         if manifest["report_id"] != rid:
             raise ValueError(f"Expected manifest report {rid}")
@@ -300,12 +264,15 @@ def _v2_splits(dataset: Path, metadata: dict, train_pct: float, val_pct: float, 
         pages = manifest["pages"]
         if type(pages) is not int or pages <= 0:
             raise ValueError(f"Invalid page count for {rid}")
-        images = tuple(f"images/{rid}{'' if n == 1 else f'_p{n:03d}'}.jpg" for n in range(1, pages + 1))
-        if manifest["images"] != list(images):
+        images = manifest["images"]
+        if not isinstance(images, list) or len(images) != pages:
             raise ValueError(f"Unexpected page paths for {rid}")
-        report_images[images] = rid
+        expected = (f"images/{rid}{'' if n == 1 else f'_p{n:03d}'}.jpg" for n in range(1, pages + 1))
+        if any(path != name for path, name in zip(images, expected)):
+            raise ValueError(f"Unexpected page paths for {rid}")
+        report_images[tuple(images)] = rid
         for image in images:
-            digest = _file_sha256(dataset / image)
+            digest = file_sha256(dataset / image)
             if manifest["sha256"][image] != digest:
                 raise ValueError(f"Checksum mismatch: {image}")
             join(rid, ("page", digest))
@@ -316,7 +283,7 @@ def _v2_splits(dataset: Path, metadata: dict, train_pct: float, val_pct: float, 
             content = (dataset / path).read_bytes()
             if hashlib.sha256(content).hexdigest() != manifest["sha256"][path]:
                 raise ValueError(f"Checksum mismatch: {path}")
-            label = json.loads(content)
+            label = decode_json(content.decode("utf-8"))
             if not isinstance(label, dict) or not isinstance(label.get("results"), list) or not label["results"]:
                 raise ValueError(f"Invalid {field} for {rid}")
             digest = _json_digest(label)
@@ -341,15 +308,7 @@ def _v2_splits(dataset: Path, metadata: dict, train_pct: float, val_pct: float, 
     return result, report_images, targets, len(groups)
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, targets):
+def _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, targets, *, optional_system=True):
     """Index small byte offsets so streams can be shuffled without holding every target in RAM."""
     source = dataset / f"{kind}_train.jsonl"
     offsets = {}
@@ -363,15 +322,16 @@ def _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, ta
                 break
             if not line.strip():
                 raise ValueError(f"Blank training record in {source.name} at byte {offset}")
-            record = json.loads(line, parse_constant=_invalid_constant)
+            record = decode_json(line.decode("utf-8"))
             rid = image_ids.get(tuple(record["images"]))
             if rid is None or rid in offsets:
                 raise ValueError(f"Unknown or duplicate report in {source.name} at byte {offset}")
-            chosen = json.loads(record["solution"] if kind == "grpo" else record["messages"][-1]["content"])
+            check_training_messages(kind, record["messages"], len(record["images"]), optional_system=optional_system)
+            chosen = decode_json(record["solution"] if kind == "grpo" else record["messages"][-1]["content"])
             if _json_digest(chosen) != targets[rid]:
                 raise ValueError(f"Training target differs from report {rid} in {source.name}")
             if kind == "dpo":
-                rejected = json.loads(record["rejected_response"], parse_constant=_invalid_constant)
+                rejected = decode_json(record["rejected_response"])
                 if (not isinstance(rejected, dict) or not isinstance(rejected.get("results"), list)
                         or rejected == chosen):
                     raise ValueError(f"Invalid DPO negative for {rid}")
@@ -388,13 +348,13 @@ def _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, ta
                     raw = stream.readline()
                     if hashlib.sha256(raw).digest() != expected:
                         raise ValueError(f"{source.name} changed while packaging {rid}")
-                    record = json.loads(raw, parse_constant=_invalid_constant)
+                    record = decode_json(raw.decode("utf-8"))
                     record["images"] = [(image_prefix / image).as_posix() for image in record["images"]]
                     output.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
             size = path.stat().st_size
             details[split] = {"file": name, "lines": len(ids),
                               "size_bytes": size, "size_kb": round(size / 1024, 1)}
-        _check_source_unchanged(source, original)
+        check_source_unchanged(source, original)
     return {"source": source.name, "total_lines": len(offsets),
             "splits": {k: len(v) for k, v in splits.items()}, "split_details": details,
             "validation_errors": 0, "validation_error_details": []}
@@ -409,7 +369,7 @@ def package_dataset(dataset_dir: Path, output_dir: Path | None, train_pct: float
         raise ValueError("Specify a dataset directory and a separate split destination")
     formats = ("sft", "dpo", "grpo")
     metadata_path = dataset / "metadata.json"
-    meta = json.loads(metadata_path.read_bytes()) if metadata_path.exists() else {}
+    meta = read_json(metadata_path) if metadata_path.exists() else {}
     if not isinstance(meta, dict):
         raise ValueError("Generator metadata must be a JSON object")
     schema = meta.get("schema_version", 1)
@@ -435,8 +395,10 @@ def package_dataset(dataset_dir: Path, output_dir: Path | None, train_pct: float
             except ValueError:
                 image_prefix = Path(".")
                 image_base = "original dataset"
+            optional_system = "simulation_revision" not in meta and "reference_policy" not in meta
             for kind in present:
-                results[kind] = _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, targets)
+                results[kind] = _split_v2_stream(dataset, staging, image_prefix, kind, splits, image_ids, targets,
+                                                 optional_system=optional_system)
             with (staging / "report_splits.json").open("x", encoding="utf-8") as stream:
                 json.dump(splits, stream, indent=2)
             extra = {"group_count": group_count, "assignment": "report_splits.json",

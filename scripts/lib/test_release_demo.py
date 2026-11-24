@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -142,3 +144,99 @@ def test_release_builder_refuses_changed_demo_inputs(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="Public demo fixture differs"):
         builder.archive(tmp_path, destination)
     assert not destination.exists()
+
+
+def test_gap_panels_preserve_definition_priority_and_ignore_duplicate_members(tmp_path):
+    from shutil import copytree
+    from scripts.lib.report_composer import ReportComposer
+
+    data = copytree(ROOT / "src/paddle_ocr/dictionaries/data", tmp_path / "data")
+    (data / "panel_definitions.json").write_text(json.dumps({"panels": [
+        {"id": "first", "name_en": "First", "members": ["2345-7", "X", "X"]},
+        {"id": "second", "name_es": "Second", "members": ["2345-7", "X", "Y"]},
+    ]}))
+    composer = ReportComposer(str(data))
+    # Curated panels precede custom panels; equal coverage preserves file order.
+    assert composer._find_best_gap_panel({"2345-7"}, []) == "bioquimica_basica"
+    assert composer._find_best_gap_panel({"X"}, []) == "first"
+    assert composer._find_best_gap_panel({"X", "Y"}, []) == "second"
+    assert composer._find_best_gap_panel({"X", "Y"}, ["second"]) == "first"
+    assert composer._find_best_gap_panel({"unknown"}, []) is None
+    assert composer._find_panel_name_for_loinc("2345-7") == "Bioquimica Basica"
+    assert composer._find_panel_name_for_loinc("X") == "First"
+    assert composer._find_panel_name_for_loinc("Y") == "Second"
+
+
+def test_numeric_reference_text_is_specific_to_each_input_and_locale(tmp_path, monkeypatch):
+    import random
+    from scripts.lib import value_generator as values
+
+    # The same fictional code has different sampling envelopes in each pack.
+    code = "example"
+    terms = {code: {"scale": "Qn", "property": "MCnc", "units": ["mg/dL"]}}
+    monkeypatch.setattr(values, "load_terms", lambda: terms)
+    generators = []
+    for maximum in (9, 13):
+        path = tmp_path / f"{maximum}.json"
+        path.write_text(json.dumps({code: {"min": 1, "max": maximum, "unit": "mg/dL"}}))
+        generators.append(values.ValueGenerator(str(path), ""))
+
+    for generator, expected in zip(generators, [("3,4 - 6,6", "3.4 - 6.6"),
+                                                ("4,6 - 9,4", "4.6 - 9.4")]):
+        for make_value in (generator.generate, generator.generate_critical):
+            for european, reference in [(True, expected[0]), (False, expected[1]), (True, expected[0])]:
+                row = make_value(code, random.Random(42), european_format=european)
+                assert row.ref_formatted == reference
+                assert (row.ref_low, row.ref_high) == generator.get_ref_range(code)
+
+
+@pytest.mark.parametrize(("code", "unit", "low", "high", "expected"), [
+    ("example", "mg/dL", 1.00001, 1.00002, None),
+    ("example", "mg/dL", 1.00001, 1.01001, 1.01),
+    ("example", "mg/dL", -1.01001, -1.00001, -1.01),
+    ("example", "mg/dL", 999.99, 1000.4, 1000.0),
+    ("770-8", "%", 45.009, 45.011, 45.01),
+])
+def test_rounded_results_fit_custom_numeric_envelopes(tmp_path, monkeypatch, code, unit, low, high, expected):
+    from random import Random
+    from scripts.lib import value_generator as values
+
+    terms = {code: {"scale": "Qn", "property": "MCnc", "units": [unit]}}
+    monkeypatch.setattr(values, "load_terms", lambda: terms)
+    path = tmp_path / "ranges.json"
+    path.write_text(json.dumps({code: {"min": low, "max": high, "unit": unit}}))
+    generator = values.ValueGenerator(str(path), "")
+    # Legacy manifests reconstruct eligibility from the original pack.
+    assert generator.has_loinc(code)
+    for european in (True, False):
+        for draw in (generator.generate, generator.generate_critical):
+            for seed in (3, 17, 29):
+                if expected is None:
+                    with pytest.raises(ValueError, match="No value for example fits"):
+                        draw(code, Random(seed), european_format=european)
+                else:
+                    row = draw(code, Random(seed), european_format=european)
+                    printed = row.value_formatted
+                    if european:
+                        printed = printed.replace(".", "").replace(",", ".")
+                    assert float(printed) == expected
+                    assert low <= row.value <= high
+                    assert row.flag == generator._compute_flag(row.value, row.ref_low, row.ref_high)
+
+
+def test_derived_target_is_omitted_if_its_rounded_formula_crosses_a_custom_bound(tmp_path, monkeypatch):
+    from scripts.lib import value_generator as values
+    from scripts.lib.correlation_engine import CorrelationEngine
+
+    # 140 - (100 + 29.96) is within 10.03–10.05, but displays as 10.0.
+    target = "10466-1"
+    unit = "mmol/L"
+    terms = {target: {"scale": "Qn", "property": "SCnc", "units": [unit]}}
+    monkeypatch.setattr(values, "load_terms", lambda: terms)
+    path = tmp_path / "ranges.json"
+    path.write_text(json.dumps({target: {"min": 10.03, "max": 10.05, "unit": unit}}))
+    engine = CorrelationEngine(values.ValueGenerator(str(path), ""))
+    source_values = {"2951-2": 140, "2075-0": 100, "1963-8": 29.96}
+    rows = {code: values.GeneratedValue(v, str(v), unit, None, None, "", None, True, "Qn")
+            for code, v in source_values.items()}
+    assert set(engine.apply_derived_values(rows)) == set(source_values)

@@ -128,7 +128,7 @@ def test_writer_propagates_delayed_stream_errors(tmp_path):
             raise OSError("simulated disk full during close")
 
     writer = GroundTruthWriter(tmp_path)
-    writer._sft_file = FullDisk()
+    writer._streams["sft"] = FullDisk()
     with pytest.raises(OSError, match="disk full"):
         writer.close()
 

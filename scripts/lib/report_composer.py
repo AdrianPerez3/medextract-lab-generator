@@ -229,7 +229,7 @@ class CoverageTracker:
 
     def uncovered_loincs(self, all_loincs: set[str]) -> set[str]:
         """Return LOINCs that have never appeared."""
-        return all_loincs - set(self.loinc_counts.keys())
+        return all_loincs.difference(self.loinc_counts)
 
     def least_covered_loincs(self, n: int = 50) -> list[str]:
         """Return the n LOINCs with the fewest appearances."""
@@ -305,11 +305,21 @@ class ReportComposer:
                     "loincs": known,
                 }
 
-        # Build reverse index: LOINC -> list of enriched panel IDs
-        self._loinc_to_panels: dict[str, list[str]] = {}
-        for panel_id, pdef in self._enriched_panels.items():
-            for loinc in pdef["loincs"]:
-                self._loinc_to_panels.setdefault(loinc, []).append(panel_id)
+        # Gap selection scores unique members; rendering still uses the original
+        # ordered member lists for seeded shuffling. Enriched panels win ties.
+        self._gap_panels: list[tuple[str, frozenset[str]]] = []
+        self._panel_names: dict[str, str] = {}
+        for panel_id, panel in self._enriched_panels.items():
+            members = frozenset(panel["loincs"])
+            self._gap_panels.append((panel_id, members))
+            for code in members:
+                self._panel_names.setdefault(code, panel["name_es"])
+        for panel_id, panel in self._panel_defs.items():
+            members = frozenset(panel.get("members", ()))
+            self._gap_panels.append((panel_id, members))
+            name = panel.get("name_es", panel.get("name_en", "Otros"))
+            for code in members:
+                self._panel_names.setdefault(code, name)
 
         # Lab info indexed by region for fast lookup
         self._labs_by_region: dict[str, list[dict[str, str]]] = {}
@@ -428,45 +438,25 @@ class ReportComposer:
             if best_panel:
                 panels.append(best_panel)
 
-        # Deduplicate preserving order
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for p in panels:
-            if p not in seen:
-                seen.add(p)
-                deduped.append(p)
-        return deduped
+        return list(dict.fromkeys(panels))
 
     def _find_best_gap_panel(
         self,
         uncovered: set[str],
         exclude: list[str],
     ) -> str | None:
-        """Find the panel covering the most uncovered LOINCs.
-
-        Searches BOTH enriched panels (15 curated) AND the full
-        panel_definitions.json (509 panels including class-based groups
-        like class_CHEM with 1440 LOINCs, class_MICRO with 1851, etc.).
-        """
+        """Find the first non-excluded panel with the largest coverage gain."""
         best_id: str | None = None
         best_count = 0
-        # Search enriched panels first (higher quality)
-        for panel_id, pdef in self._enriched_panels.items():
-            if panel_id in exclude:
+        for panel_id, members in self._gap_panels:
+            if len(members) <= best_count or panel_id in exclude:
                 continue
-            overlap = len(set(pdef["loincs"]) & uncovered)
-            if overlap > best_count:
-                best_count = overlap
-                best_id = panel_id
-        # Search full panel definitions (covers all 6,423 LOINCs)
-        for panel_id, pdef in self._panel_defs.items():
-            if panel_id in exclude:
-                continue
-            members = set(pdef.get("members", []))
             overlap = len(members & uncovered)
             if overlap > best_count:
                 best_count = overlap
                 best_id = panel_id
+                if best_count == len(uncovered):
+                    break
         return best_id
 
     # ------------------------------------------------------------------
@@ -512,9 +502,6 @@ class ReportComposer:
                 rng.shuffle(members)
                 for loinc in members:
                     if loinc not in loinc_to_panel and loinc in self.eligible_loincs:
-                        # FIX 7: skip veterinary-only LOINCs
-                        if self._is_veterinary(loinc):
-                            continue
                         # FIX 8: cap MICRO/SERO tests at 10 per report
                         loinc_meta = self._metadata.get(loinc, {})
                         loinc_cls = loinc_meta.get("CLASS", "")
@@ -545,9 +532,6 @@ class ReportComposer:
             added = 0
             for loinc in candidates:
                 if loinc not in loinc_to_panel and loinc in self.eligible_loincs:
-                    # FIX 7: skip veterinary-only LOINCs
-                    if self._is_veterinary(loinc):
-                        continue
                     # FIX 8: cap MICRO/SERO tests at 10 per report
                     loinc_meta = self._metadata.get(loinc, {})
                     loinc_cls = loinc_meta.get("CLASS", "")
@@ -566,14 +550,8 @@ class ReportComposer:
 
     def _find_panel_name_for_loinc(self, loinc: str) -> str:
         """Find a panel name for an individual LOINC."""
-        # Check enriched panels first
-        panel_ids = self._loinc_to_panels.get(loinc, [])
-        if panel_ids:
-            return self._enriched_panels[panel_ids[0]]["name_es"]
-        # Check full panel_definitions (loinc_to_panels reverse index)
-        for panel_id, pdef in self._panel_defs.items():
-            if loinc in pdef.get("members", []):
-                return pdef.get("name_es", pdef.get("name_en", "Otros"))
+        if loinc in self._panel_names:
+            return self._panel_names[loinc]
         # Fallback: use metadata CLASS
         meta = self._metadata.get(loinc, {})
         cls = meta.get("CLASS", "")
@@ -772,8 +750,9 @@ class ReportComposer:
             # Build ground truth entry
             # For ground truth, use raw unformatted values
             gt_value = str(gv.value) if gv.is_numeric else gv.value_formatted
-            gt_ref = ""
-            if gv.ref_low is not None and gv.ref_high is not None:
+            if not simulated_reference_ranges:
+                gt_ref = ""
+            elif gv.ref_low is not None and gv.ref_high is not None:
                 gt_ref = f"{gv.ref_low} - {gv.ref_high}"
             elif gv.ref_low is not None:
                 gt_ref = f"> {gv.ref_low}"
@@ -786,7 +765,7 @@ class ReportComposer:
                 "test_name": selection.display_name,
                 "value": gt_value,
                 "unit": gv.unit,
-                "reference_range": gt_ref if simulated_reference_ranges else "",
+                "reference_range": gt_ref,
                 "flag": rt.flag,
                 "loinc": loinc,
                 "panel": panel_name,
